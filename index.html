@@ -1071,7 +1071,7 @@ class Game {
     consItem() { this.addItem(this.player.inv[this.player.sel].id, -1); }
     addItem(id, n) {
         let s = this.player.inv.find(i=>i.id===id);
-        if(s) { s.n+=n; if(s.n<=0 && PROPS[id].maxStack!==1) {s.id=IDS.AIR; s.n=0;} }
+        if(s) { s.n+=n; if(s.n<=0) {s.id=IDS.AIR; s.n=0;} }
         else if(n>0) { let e = this.player.inv.find(i=>i.id===IDS.AIR); if(e) { e.id=id; e.n=n; } }
         this.uiUpd();
     }
