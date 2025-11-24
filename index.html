@@ -1070,9 +1070,26 @@ class Game {
     createPart(gx,gy,c) { for(let i=0;i<5;i++) this.parts.push(new Particle(gx*32+16, gy*32+16, c, 4)); }
     consItem() { this.addItem(this.player.inv[this.player.sel].id, -1); }
     addItem(id, n) {
-        let s = this.player.inv.find(i=>i.id===id);
-        if(s) { s.n+=n; if(s.n<=0) {s.id=IDS.AIR; s.n=0;} }
-        else if(n>0) { let e = this.player.inv.find(i=>i.id===IDS.AIR); if(e) { e.id=id; e.n=n; } }
+        if(n > 0) {
+            let p = PROPS[id];
+            let max = (p && p.maxStack) ? p.maxStack : 999;
+            while(n > 0) {
+                let s = this.player.inv.find(i => i.id === id && i.n < max);
+                if(s) {
+                    let add = Math.min(n, max - s.n);
+                    s.n += add; n -= add;
+                } else {
+                    let e = this.player.inv.find(i => i.id === IDS.AIR);
+                    if(e) {
+                        let add = Math.min(n, max);
+                        e.id = id; e.n = add; n -= add;
+                    } else break;
+                }
+            }
+        } else {
+            let s = this.player.inv.find(i=>i.id===id);
+            if(s) { s.n+=n; if(s.n<=0) {s.id=IDS.AIR; s.n=0;} }
+        }
         this.uiUpd();
     }
     toggleCraft() { this.ui.craft=!this.ui.craft; document.getElementById('crafting-menu').style.display=this.ui.craft?'block':'none'; if(this.ui.craft) this.rendRec(); }
