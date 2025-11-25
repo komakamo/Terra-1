@@ -1161,14 +1161,24 @@ class Game {
         this.uiUpd();
     }
     toggleCraft() { this.ui.craft=!this.ui.craft; document.getElementById('crafting-menu').style.display=this.ui.craft?'block':'none'; if(this.ui.craft) this.rendRec(); }
+    _canCraft(recipe, nearbyStations) {
+        const hasMaterials = recipe.in.every(m =>
+            this.player.inv.find(i => i.id === m.id && i.n >= m.n)
+        );
+        if (!hasMaterials) return false;
+
+        if (recipe.station && !nearbyStations.includes(recipe.station)) return false;
+
+        return true;
+    }
     rendRec() {
         let l=document.getElementById('recipe-list'); l.innerHTML='';
         let cx=Math.floor((this.player.x+10)/32), cy=Math.floor((this.player.y+18)/32);
         let stations=[]; for(let y=cy-3;y<=cy+3;y++)for(let x=cx-3;x<=cx+3;x++) if(x>=0&&x<CHUNK_WIDTH&&y>=0&&y<CHUNK_HEIGHT && PROPS[this.world[y][x]] && PROPS[this.world[y][x]].station) stations.push(this.world[y][x]);
         RECIPES.forEach(r=>{
-            let can=true; let txt="";
-            r.in.forEach(m=>{ if(this.player.inv.find(i=>i.id===m.id && i.n>=m.n)){}else{can=false;} txt+=`${PROPS[m.id].name} x${m.n} `; });
-            if(r.station && !stations.includes(r.station)) can=false;
+            const can = this._canCraft(r, stations);
+            let txt="";
+            r.in.forEach(m=>{ txt+=`${PROPS[m.id].name} x${m.n} `; });
             let d=document.createElement('div'); d.className='recipe'+(can?'':' disabled');
             d.innerHTML=`<div class="recipe-icon" style="background:${PROPS[r.out.id].color}"></div><div class="recipe-details"><div><b>${PROPS[r.out.id].name}</b> x${r.out.n}</div><div style="color:#aaa">${txt}</div></div>`;
             d.onclick=()=>{ if(can) { r.in.forEach(m=>this.addItem(m.id,-m.n)); this.addItem(r.out.id, r.out.n); this.rendRec(); } };
@@ -1431,10 +1441,68 @@ window.onload = () => {
 
 function runTests() {
     console.log("Running automated tests...");
-    let allTestsPassed = true;
 
-    // Test: Horizontal Collision
-    try {
+    const TestSuite = {
+        tests: [],
+        total: 0,
+        passed: 0,
+
+        test(name, fn) {
+            this.tests.push({ name, fn });
+        },
+
+        run() {
+            console.log("Starting test run...");
+            for (const { name, fn } of this.tests) {
+                this.total++;
+                try {
+                    fn();
+                    this.passed++;
+                    console.log(`  [PASS] ${name}`);
+                } catch (e) {
+                    console.error(`  [FAIL] ${name}: ${e.message}\n${e.stack}`);
+                }
+            }
+            this.summary();
+            return this.passed === this.total;
+        },
+
+        assert(condition, message) {
+            if (!condition) {
+                throw new Error(message || "Assertion failed");
+            }
+        },
+
+        assertEquals(a, b, message) {
+            if (a !== b) {
+                throw new Error(message || `Expected ${JSON.stringify(a)} to equal ${JSON.stringify(b)}`);
+            }
+        },
+
+        assertDeepEquals(a, b, message) {
+            if (JSON.stringify(a) !== JSON.stringify(b)) {
+                throw new Error(message || `Expected ${JSON.stringify(a)} to deeply equal ${JSON.stringify(b)}`);
+            }
+        },
+
+        summary() {
+            console.log(`\nTest Summary: ${this.passed} / ${this.total} passed.`);
+            const resultsDiv = document.createElement('div');
+            resultsDiv.id = 'test-results';
+            resultsDiv.dataset.passed = this.passed;
+            resultsDiv.dataset.total = this.total;
+            document.body.innerHTML = ''; // Clear body
+            document.body.appendChild(resultsDiv);
+
+            if (this.passed !== this.total) {
+                console.error("Some tests failed.");
+            } else {
+                console.log("All tests passed!");
+            }
+        }
+    };
+
+    TestSuite.test("Horizontal Collision", () => {
         const collideFn = Game.prototype.collide;
         const mockGameInstance = {
             world: new Array(CHUNK_HEIGHT).fill(0).map(() => new Array(CHUNK_WIDTH).fill(IDS.AIR))
@@ -1454,23 +1522,92 @@ function runTests() {
             vy: 0
         };
 
-        const initialX = player.x;
         player.x += player.vx;
         collide(player, true);
 
         const correctedX = wallX * TILE_SIZE - player.w - 0.1;
+        TestSuite.assert(Math.abs(player.x - correctedX) < 0.1, `Player penetrated wall. Expected X: ~${correctedX.toFixed(2)}, Got: ${player.x.toFixed(2)}`);
+    });
 
-        if (Math.abs(player.x - correctedX) > 0.1) {
-            throw new Error(`Player penetrated wall. Expected X: ${correctedX}, Got: ${player.x}`);
+    TestSuite.test("Inventory: addItem to empty slot", () => {
+        const game = new Game();
+        game.player.inv.forEach(s => {s.id=IDS.AIR; s.n=0;});
+        game.addItem(IDS.WOOD, 10);
+        TestSuite.assertDeepEquals(game.player.inv[0], {id:IDS.WOOD, n:10}, "Item not added to empty slot correctly.");
+    });
+
+    TestSuite.test("Inventory: addItem stacking", () => {
+        const game = new Game();
+        game.player.inv.forEach(s => {s.id=IDS.AIR; s.n=0;});
+        game.player.inv[0] = {id:IDS.WOOD, n:5};
+        game.addItem(IDS.WOOD, 10);
+        TestSuite.assertEquals(game.player.inv[0].n, 15, "Item not stacked correctly.");
+    });
+
+    TestSuite.test("Inventory: addItem with full inventory", () => {
+        const game = new Game();
+        for (let i = 0; i < game.player.inv.length; i++) {
+            game.player.inv[i] = {id: IDS.STONE, n: 1};
         }
-        console.log("  [PASS] Horizontal collision test.");
-    } catch (e) {
-        console.error(`  [FAIL] Horizontal collision test: ${e.message}`);
-        allTestsPassed = false;
-    }
+        game.addItem(IDS.WOOD, 10);
+        TestSuite.assert(game.player.inv.every(i => i.id !== IDS.WOOD), "Item added to a full inventory.");
+    });
 
-    console.log(allTestsPassed ? "All tests passed!" : "Some tests failed.");
-    return allTestsPassed;
+    TestSuite.test("Crafting: Can craft with materials", () => {
+        const game = new Game();
+        game.player.inv = [{id:IDS.WOOD, n:10}];
+        const recipe = { in: [{id:IDS.WOOD, n:10}] };
+        TestSuite.assert(game._canCraft(recipe, []), "Should be able to craft with enough materials.");
+    });
+
+    TestSuite.test("Crafting: Cannot craft without materials", () => {
+        const game = new Game();
+        game.player.inv = [{id:IDS.WOOD, n:5}];
+        const recipe = { in: [{id:IDS.WOOD, n:10}] };
+        TestSuite.assert(!game._canCraft(recipe, []), "Should not be able to craft without enough materials.");
+    });
+
+    TestSuite.test("Crafting: Cannot craft without station", () => {
+        const game = new Game();
+        game.player.inv = [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}];
+        const recipe = { in: [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}], station: IDS.WORKBENCH };
+        TestSuite.assert(!game._canCraft(recipe, []), "Should not be able to craft without the required station.");
+    });
+
+    TestSuite.test("Vertical Collision", () => {
+        const game = new Game();
+        const collide = game.collide.bind(game);
+        const groundY = 10;
+        game.world[groundY][10] = IDS.STONE;
+
+        const player = {
+            x: 10 * TILE_SIZE,
+            y: (groundY - 3) * TILE_SIZE,
+            w: 20,
+            h: 36,
+            vx: 0,
+            vy: 60,
+            grounded: false
+        };
+
+        player.y += player.vy;
+        collide(player, false);
+
+        const correctedY = groundY * TILE_SIZE - player.h;
+        TestSuite.assert(Math.abs(player.y - correctedY) < 0.1, `Player fell through ground. Expected Y: ~${correctedY.toFixed(2)}, Got: ${player.y.toFixed(2)}`);
+        TestSuite.assert(player.grounded, "Player should be grounded after collision.");
+    });
+
+    TestSuite.test("Combat: Player takes damage", () => {
+        const game = new Game();
+        game.player.hp = 100;
+        game.player.def = 5;
+        game.player.hit(20);
+        TestSuite.assertEquals(game.player.hp, 85, "Damage not calculated correctly with defense.");
+        TestSuite.assert(game.player.invin > 0, "Invincibility frames not applied after being hit.");
+    });
+
+    return TestSuite.run();
 }
 </script>
 </body>
