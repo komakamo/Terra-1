@@ -171,6 +171,16 @@
     </div>
 
 <script>
+
+function mulberry32(a) {
+    return function() {
+      var t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
+
 /** CONSTANTS */
 const TILE_SIZE = 32;
 const CHUNK_WIDTH = 240;
@@ -1366,8 +1376,61 @@ class Game {
                         else if(p.decor==='hell') { this.ctx.fillRect(px,py,32,32); this.ctx.fillStyle='#f00'; this.ctx.fillRect(px+4,py+4,6,6); }
                         else if(p.decor==='cactus') { this.ctx.fillStyle='#43a047'; this.ctx.fillRect(px+8,py,16,32); }
                         else { this.ctx.fillRect(px,py,32,32); this.ctx.fillStyle='rgba(255,255,255,0.3)'; this.ctx.fillRect(px+4,py+4,6,6); }
-                    } else this.ctx.fillRect(px,py,32,32);
-                    if((t===IDS.GRASS||t===IDS.PURPLE_GRASS||t===IDS.MUSHROOM_GRASS) && p.topColor) { this.ctx.fillStyle=p.topColor; this.ctx.fillRect(px,py,32,6); }
+                    } else {
+                         // Procedural block rendering for non-decor blocks
+                        switch (t) {
+                            case IDS.DIRT:
+                                this.ctx.fillStyle = p.color;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                let rand = mulberry32(px * 13 + py * 59);
+                                for (let i = 0; i < 15; i++) {
+                                    this.ctx.fillStyle = `rgba(0,0,0,${rand() * 0.15})`;
+                                    this.ctx.fillRect(px + rand() * 30, py + rand() * 30, 2, 2);
+                                }
+                                break;
+                            case IDS.GRASS:
+                            case IDS.PURPLE_GRASS:
+                            case IDS.MUSHROOM_GRASS:
+                                let baseColor = (t === IDS.MUSHROOM_GRASS) ? PROPS[IDS.MUD].color : PROPS[IDS.DIRT].color;
+                                this.ctx.fillStyle = baseColor;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                const grad = this.ctx.createLinearGradient(px, py, px, py + 8);
+                                grad.addColorStop(0, p.topColor);
+                                grad.addColorStop(1, p.color);
+                                this.ctx.fillStyle = grad;
+                                this.ctx.fillRect(px, py, 32, 8);
+                                break;
+                            case IDS.STONE:
+                                this.ctx.fillStyle = p.color;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                this.ctx.strokeStyle = 'rgba(0,0,0,0.3)'; this.ctx.lineWidth = 1;
+                                this.ctx.beginPath(); this.ctx.moveTo(px+5,py+2); this.ctx.lineTo(px+20, py+28); this.ctx.stroke();
+                                this.ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                                this.ctx.beginPath(); this.ctx.moveTo(px+7,py+2); this.ctx.lineTo(px+22, py+28); this.ctx.stroke();
+                                break;
+                            case IDS.WOOD:
+                                this.ctx.fillStyle = p.color;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                this.ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                                this.ctx.fillRect(px + 4, py, 5, 32); this.ctx.fillRect(px + 15, py, 3, 32); this.ctx.fillRect(px + 24, py, 4, 32);
+                                break;
+                            case IDS.LEAVES:
+                                this.ctx.fillStyle = p.color;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                let leafRand = mulberry32(px * 17 + py * 61);
+                                for (let i = 0; i < 10; i++) {
+                                    this.ctx.fillStyle = `rgba(0,0,0,${leafRand() * 0.2})`;
+                                    this.ctx.beginPath();
+                                    this.ctx.arc(px + leafRand() * 32, py + leafRand() * 32, leafRand() * 4 + 2, 0, Math.PI * 2);
+                                    this.ctx.fill();
+                                }
+                                break;
+                            default:
+                                this.ctx.fillStyle = p.color;
+                                this.ctx.fillRect(px, py, 32, 32);
+                                break;
+                        }
+                    }
                 }
 
                 // Mining Crack
