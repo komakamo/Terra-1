@@ -1219,9 +1219,12 @@ class Game {
     }
     toggleCraft() { this.ui.craft=!this.ui.craft; document.getElementById('crafting-menu').style.display=this.ui.craft?'block':'none'; if(this.ui.craft) this.rendRec(); }
     _canCraft(recipe, nearbyStations) {
-        const hasMaterials = recipe.in.every(m =>
-            this.player.inv.find(i => i.id === m.id && i.n >= m.n)
-        );
+        const hasMaterials = recipe.in.every(m => {
+            const total = this.player.inv
+                .filter(i => i.id === m.id)
+                .reduce((sum, i) => sum + i.n, 0);
+            return total >= m.n;
+        });
         if (!hasMaterials) return false;
 
         if (recipe.station && !nearbyStations.includes(recipe.station)) return false;
@@ -1686,6 +1689,13 @@ function runTests() {
         game.player.inv = [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}];
         const recipe = { in: [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}], station: IDS.WORKBENCH };
         TestSuite.assert(!game._canCraft(recipe, []), "Should not be able to craft without the required station.");
+    });
+
+    TestSuite.test("Crafting: Can craft with materials in multiple stacks", () => {
+        const game = new Game();
+        game.player.inv = [{id:IDS.WOOD, n:5}, {id:IDS.WOOD, n:5}];
+        const recipe = { in: [{id:IDS.WOOD, n:10}] };
+        TestSuite.assert(game._canCraft(recipe, []), "Should be able to craft with materials from multiple stacks.");
     });
 
     TestSuite.test("Vertical Collision", () => {
