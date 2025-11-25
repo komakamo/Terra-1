@@ -181,10 +181,38 @@ const PLAYER_SPEED = 4;
 const JUMP_FORCE = 9;
 const REACH_PX = 6 * TILE_SIZE;
 const INV_SIZE = 30; // 3 rows of 10
-const tileset = new Image();
-tileset.src = 'assets/tiles.png';
-let tilesetReady = false;
-tileset.onload = () => tilesetReady = true;
+const TILESET_SOURCES = [
+    'assets/tiles.png',
+    'assets/images/blocks1.jpg',
+    'assets/images/blocks2.jpg'
+];
+
+const tilesets = TILESET_SOURCES.map(src => {
+    const img = new Image();
+    const entry = { img, src, ready: false };
+    img.onload = () => entry.ready = true;
+    img.onerror = () => console.warn(`Failed to load tileset: ${src}`);
+    img.src = src;
+    return entry;
+});
+
+let activeTilesetIndex = 0;
+const getActiveTileset = () => {
+    const chosen = tilesets[activeTilesetIndex];
+    if (chosen.ready) return chosen;
+    return tilesets.find(t => t.ready) || chosen;
+};
+const cycleTileset = (dir = 1) => {
+    const len = tilesets.length;
+    for (let i = 1; i <= len; i++) {
+        const idx = (activeTilesetIndex + dir * i + len) % len;
+        if (tilesets[idx].ready) {
+            activeTilesetIndex = idx;
+            return tilesets[idx];
+        }
+    }
+    return getActiveTileset();
+};
 
 /*
 Sprite atlas expectations (replace assets/tiles.png to re-skin):
@@ -621,11 +649,16 @@ class Game {
         window.onkeydown=e=>{ 
             this.keys[e.code]=true; 
             if(e.key>='1'&&e.key<='9') { this.player.sel=parseInt(e.key)-1; this.uiUpd(); } 
-            if(e.code==='KeyE') { 
+            if(e.code==='KeyE') {
                 if(this.ui.inv) this.toggleInv(); // Close inv if open
-                else this.interact(); 
+                else this.interact();
             }
             if(e.code==='KeyH') this.checkHousing();
+            if(e.code==='KeyT') {
+                const ts = cycleTileset();
+                const label = ts?.src?.split('/').pop() || 'Tileset';
+                this.log(`Tileset switched to ${label}${ts.ready ? '' : ' (loading...)'}`);
+            }
             if(e.code==='Space') this.jump();
             if(e.code==='F5') this.saveGame();
             if(e.code==='F9') { if(this.loadGame()) this.log("Game Loaded!"); }
@@ -1269,8 +1302,9 @@ class Game {
         this.ctx.save(); this.ctx.translate(-Math.floor(this.cam.x), -Math.floor(this.cam.y));
 
         const drawSpriteIfReady = (props, dx, dy) => {
-            if(tilesetReady && props && props.sprite) {
-                this.ctx.drawImage(tileset, props.sprite.x*TILE_SIZE, props.sprite.y*TILE_SIZE, TILE_SIZE, TILE_SIZE, dx, dy, TILE_SIZE, TILE_SIZE);
+            const activeTileset = getActiveTileset();
+            if(activeTileset.ready && props && props.sprite) {
+                this.ctx.drawImage(activeTileset.img, props.sprite.x*TILE_SIZE, props.sprite.y*TILE_SIZE, TILE_SIZE, TILE_SIZE, dx, dy, TILE_SIZE, TILE_SIZE);
                 return true;
             }
             return false;
