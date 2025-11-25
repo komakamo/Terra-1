@@ -1068,7 +1068,14 @@ class Game {
     calcDef() { this.player.def = 0; if(this.player.armor) this.player.def = PROPS[this.player.armor].def; this.uiUpd(); }
     rectCol(x1,y1,w1,h1, x2,y2,w2,h2) { return x1<x2+w2 && x1+w1>x2 && y1<y2+h2 && y1+h1>y2; }
     createPart(gx,gy,c) { for(let i=0;i<5;i++) this.parts.push(new Particle(gx*32+16, gy*32+16, c, 4)); }
-    consItem() { this.addItem(this.player.inv[this.player.sel].id, -1); }
+    consItem() {
+        let s = this.player.inv[this.player.sel];
+        if(s.id !== IDS.AIR && s.n > 0) {
+             s.n--;
+             if(s.n <= 0) { s.id = IDS.AIR; s.n = 0; }
+             this.uiUpd();
+        }
+    }
     addItem(id, n) {
         if(n > 0) {
             let p = PROPS[id];
