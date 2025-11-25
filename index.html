@@ -571,7 +571,9 @@ class Entity {
             if(this.vy>0) {
                 let pL=getP(l,b), pR=getP(r,b);
                 if((pL&&pL.solid)||(pR&&pR.solid)) { if(this.y+this.h <= b*32+12) { this.y=b*32-this.h; this.vy=0; this.grounded=true; } }
-                else if((pL&&pL.platform)||(pR&&pR.platform)) { if(this.y+this.h <= b*32+12 && !this.keys['KeyS']) { this.y=b*32-this.h; this.vy=0; this.grounded=true; } }
+                // NPCs/Enemies don't have key state, so they can't drop down platforms.
+                // Player platform logic is handled separately in Game.prototype.collide.
+                else if((pL&&pL.platform)||(pR&&pR.platform)) { if(this.y+this.h <= b*32+12) { this.y=b*32-this.h; this.vy=0; this.grounded=true; } }
             }
             else if(this.vy<0) {
                 let pL=getP(l,t), pR=getP(r,t);
