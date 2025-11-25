@@ -542,10 +542,21 @@ class Entity {
         if(this.fly) return;
         const l=Math.floor(this.x/32), r=Math.floor((this.x+this.w)/32), t=Math.floor(this.y/32), b=Math.floor((this.y+this.h)/32);
         const getP = (x,y) => { if(x>=0 && x<CHUNK_WIDTH && y>=0 && y<CHUNK_HEIGHT) return PROPS[world[y][x]]; return null; };
-        if(isX) {
-            let pR=getP(r,t), pRb=getP(r,b-1), pL=getP(l,t), pLb=getP(l,b-1);
-            if(this.vx>0 && ((pR&&pR.solid) || (pRb&&pRb.solid))) { this.x=r*32-this.w-0.1; this.vx=0; }
-            else if(this.vx<0 && ((pL&&pL.solid) || (pLb&&pLb.solid))) { this.x=(l+1)*32+0.1; this.vx=0; }
+        if (isX) {
+            for (let y = t; y <= b; y++) {
+                let pR = getP(r, y);
+                if (this.vx > 0 && pR && pR.solid) {
+                    this.x = r * 32 - this.w - 0.1;
+                    this.vx = 0;
+                    break;
+                }
+                let pL = getP(l, y);
+                if (this.vx < 0 && pL && pL.solid) {
+                    this.x = (l + 1) * 32 + 0.1;
+                    this.vx = 0;
+                    break;
+                }
+            }
         } else {
             if(this.vy>0) {
                 let pL=getP(l,b), pR=getP(r,b);
@@ -1257,14 +1268,23 @@ class Game {
             return null;
         };
         
-        if(isX) {
-            // For horizontal, platforms are NOT solid.
-            // Check strictly solid blocks.
-            let pR = getP(r,t), pRb = getP(r,b-1);
-            let pL = getP(l,t), pLb = getP(l,b-1);
-            
-            if(obj.vx>0 && ((pR&&pR.solid) || (pRb&&pRb.solid))) { obj.x=r*32-obj.w-0.1; obj.vx=0; }
-            else if(obj.vx<0 && ((pL&&pL.solid) || (pLb&&pLb.solid))) { obj.x=(l+1)*32+0.1; obj.vx=0; }
+        if (isX) {
+            for (let y = t; y <= b; y++) {
+                // For horizontal, platforms are NOT solid.
+                // Check strictly solid blocks.
+                let pR = getP(r, y);
+                if (obj.vx > 0 && pR && pR.solid) {
+                    obj.x = r * 32 - obj.w - 0.1;
+                    obj.vx = 0;
+                    break;
+                }
+                let pL = getP(l, y);
+                if (obj.vx < 0 && pL && pL.solid) {
+                    obj.x = (l + 1) * 32 + 0.1;
+                    obj.vx = 0;
+                    break;
+                }
+            }
         } else {
             if(obj.vy>0) {
                 // Feet check
@@ -1393,6 +1413,12 @@ class Game {
 
 // Replaced window.onload to add click-to-start requirement
 window.onload = () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('test') === 'true') {
+        runTests();
+        return;
+    }
+
     const startScreen = document.getElementById('start-screen');
     const startHandler = () => {
         startScreen.style.display = 'none';
@@ -1402,6 +1428,50 @@ window.onload = () => {
     };
     startScreen.addEventListener('click', startHandler);
 };
+
+function runTests() {
+    console.log("Running automated tests...");
+    let allTestsPassed = true;
+
+    // Test: Horizontal Collision
+    try {
+        const collideFn = Game.prototype.collide;
+        const mockGameInstance = {
+            world: new Array(CHUNK_HEIGHT).fill(0).map(() => new Array(CHUNK_WIDTH).fill(IDS.AIR))
+        };
+        const collide = collideFn.bind(mockGameInstance);
+
+        const wallX = 10;
+        const wallY = 10;
+        mockGameInstance.world[wallY + 1][wallX] = IDS.STONE;
+
+        const player = {
+            x: (wallX * TILE_SIZE) - 25,
+            y: (wallY * TILE_SIZE) + 1,
+            w: 20,
+            h: 36,
+            vx: 10,
+            vy: 0
+        };
+
+        const initialX = player.x;
+        player.x += player.vx;
+        collide(player, true);
+
+        const correctedX = wallX * TILE_SIZE - player.w - 0.1;
+
+        if (Math.abs(player.x - correctedX) > 0.1) {
+            throw new Error(`Player penetrated wall. Expected X: ${correctedX}, Got: ${player.x}`);
+        }
+        console.log("  [PASS] Horizontal collision test.");
+    } catch (e) {
+        console.error(`  [FAIL] Horizontal collision test: ${e.message}`);
+        allTestsPassed = false;
+    }
+
+    console.log(allTestsPassed ? "All tests passed!" : "Some tests failed.");
+    return allTestsPassed;
+}
 </script>
 </body>
 </html>
