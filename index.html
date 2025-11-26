@@ -308,6 +308,9 @@ const IDS = {
     WORKBENCH: 20, FURNACE: 21, DOOR_CLOSED: 22, DOOR_OPEN: 23,
     TORCH: 25, HEART_CRYSTAL: 26, MUSHROOM: 27, CHEST: 28, CHEST_EMPTY: 29,
     GLOWING_MUSHROOM: 34,
+    STONE_BRICK: 35,
+    CHEST_HOUSE: 36,
+    CHEST_VAULT: 37,
 
     DIRT_WALL: 50, STONE_WALL: 51, WOOD_WALL: 52, BRICK_WALL: 53, EBON_WALL: 54,
 
@@ -344,6 +347,7 @@ const PROPS = {
     [IDS.MUD]: { name:'Mud', color:'#3e2723', solid:true, hardness:350, type:'block', sprite:{x:0,y:2} },
     [IDS.MUSHROOM_GRASS]: { name:'Mushroom Grass', color:'#1a237e', topColor:'#2979ff', solid:true, hardness:400, light:2, sprite:{x:1,y:2} },
     [IDS.GLOWING_MUSHROOM]: { name:'Glowing Mushroom', color:'#00e5ff', decor:'mushroom_blue', solid:false, light:5, hardness:50, sprite:{x:2,y:2} },
+    [IDS.STONE_BRICK]: { name:'Stone Brick', color:'#616161', solid:true, hardness:1000, type:'block', sprite:{x:3,y:2} },
 
     [IDS.COAL_ORE]: { name:'Coal', color:'#757575', decor:'coal', solid:true, hardness:900, reqTool:true, type:'material', sprite:{x:6,y:0} },
     [IDS.IRON_ORE]: { name:'Iron Ore', color:'#757575', decor:'iron', solid:true, hardness:1200, reqTool:true, minPower: 35, type:'material', sprite:{x:7,y:0} },
@@ -362,6 +366,8 @@ const PROPS = {
     [IDS.MUSHROOM]: { name:'Mushroom', color:'#f44336', decor:'mushroom', transparent:true, hardness:50, sprite:{x:3,y:3} },
     [IDS.CHEST]: { name:'Chest', color:'#ffeb3b', decor:'chest', transparent:true, hardness:Infinity, sprite:{x:4,y:3} },
     [IDS.CHEST_EMPTY]: { name:'Empty Chest', color:'#795548', decor:'chest', transparent:true, hardness:400, sprite:{x:5,y:3} },
+    [IDS.CHEST_HOUSE]: { name:'Old Chest', color:'#a1887f', decor:'chest', transparent:true, hardness:Infinity, sprite:{x:4,y:3} },
+    [IDS.CHEST_VAULT]: { name:'Gilded Chest', color:'#ffd700', decor:'chest', transparent:true, hardness:Infinity, sprite:{x:4,y:3} },
     [IDS.DOOR_CLOSED]: { name:'Door', color:'#5d4037', decor:'door_c', solid:true, transparent:true, hardness:400, sprite:{x:6,y:3} },
     [IDS.DOOR_OPEN]: { name:'Door', color:'#5d4037', decor:'door_l', transparent:true, hardness:400, sprite:{x:7,y:3} },
 
@@ -780,6 +786,47 @@ class Game {
         }
     }
 
+    generateTreasureVault() {
+        const minX = Math.floor(CHUNK_WIDTH * 0.2);
+        const maxX = Math.floor(CHUNK_WIDTH * 0.8);
+        const minY = Math.floor(CHUNK_HEIGHT * 0.5);
+        const maxY = Math.floor(CHUNK_HEIGHT * 0.8);
+        const searchAttempts = 50;
+
+        for (let i = 0; i < searchAttempts; i++) {
+            const x = minX + Math.floor(Math.random() * (maxX - minX));
+            const y = minY + Math.floor(Math.random() * (maxY - minY));
+
+            if (this.world[y][x] === IDS.AIR) {
+                const w = 7 + Math.floor(Math.random() * 4);
+                const h = 6 + Math.floor(Math.random() * 3);
+                const startX = x - Math.floor(w / 2);
+                const startY = y - Math.floor(h / 2);
+
+                for (let j = startY; j < startY + h; j++) {
+                    for (let k = startX; k < startX + w; k++) {
+                        this.world[j][k] = IDS.STONE_BRICK;
+                    }
+                }
+                for (let j = startY + 1; j < startY + h - 1; j++) {
+                    for (let k = startX + 1; k < startX + w - 1; k++) {
+                        this.world[j][k] = IDS.AIR;
+                    }
+                }
+
+                const chestX = startX + Math.floor(w / 2);
+                const chestY = startY + h - 2;
+                this.world[chestY][chestX] = IDS.CHEST_VAULT;
+
+                // Simple trap
+                this.world[chestY - 2][chestX] = IDS.LAVA;
+                this.world[chestY - 1][chestX] = IDS.SAND;
+
+                return;
+            }
+        }
+    }
+
     checkObjectiveCompletion() {
         if (this.currentObjectiveIndex >= OBJECTIVES.length) return;
 
@@ -1094,8 +1141,67 @@ class Game {
         }
         this.player.x = (CHUNK_WIDTH/2)*32; this.player.y = (hMap[Math.floor(CHUNK_WIDTH/2)]-5)*32;
         this.enemies.push(new Entity(this.player.x + 100, this.player.y, 'npc_guide'));
+
+        this.generateAbandonedHouse(hMap);
+        this.generateTreasureVault();
+
         this.calcLight();
     }
+
+    isAreaFlat(x, y, range, hMap) {
+        if (x - range < 0 || x + range >= CHUNK_WIDTH) return false;
+        const groundY = hMap[x];
+        for (let i = x - range; i <= x + range; i++) {
+            if (Math.abs(hMap[i] - groundY) > 2) return false; // Too bumpy
+            if (this.world[Math.floor(hMap[i]) - 1][i] !== IDS.AIR || this.world[Math.floor(hMap[i]) - 2][i] !== IDS.AIR) return false; // Trees in the way
+        }
+        return true;
+    }
+
+    generateAbandonedHouse(hMap) {
+        const minX = Math.floor(CHUNK_WIDTH * 0.2);
+        const maxX = Math.floor(CHUNK_WIDTH * 0.8);
+        const searchAttempts = 50;
+
+        for (let i = 0; i < searchAttempts; i++) {
+            const x = minX + Math.floor(Math.random() * (maxX - minX));
+            const y = Math.floor(hMap[x]);
+
+            if (this.isAreaFlat(x, y, 10, hMap)) {
+                const w = 8 + Math.floor(Math.random() * 5);
+                const h = 5 + Math.floor(Math.random() * 3);
+                const startX = x - Math.floor(w / 2);
+                const startY = y - h;
+
+                for (let j = startY; j < y; j++) {
+                    for (let k = startX; k < startX + w; k++) {
+                        if (k >= 0 && k < CHUNK_WIDTH && j >= 0 && j < CHUNK_HEIGHT) {
+                           this.world[j][k] = IDS.AIR;
+                           this.walls[j][k] = IDS.WOOD_WALL;
+                        }
+                    }
+                }
+
+                for (let k = startX; k < startX + w; k++) {
+                    if (this.world[y][k] === IDS.AIR) this.world[y][k] = IDS.WOOD; // Floor
+                    this.world[startY][k] = IDS.WOOD; // Roof
+                }
+                for (let j = startY; j < y; j++) {
+                    this.world[j][startX] = IDS.WOOD;
+                    this.world[j][startX + w - 1] = IDS.WOOD;
+                }
+
+                this.world[y - 1][startX + w - 3] = IDS.CHEST_HOUSE;
+                this.world[y - 1][startX + 2] = IDS.WORKBENCH;
+
+                if (Math.random() < 0.7) this.world[startY][startX + Math.floor(w/2)] = IDS.AIR;
+                if (Math.random() < 0.5) this.walls[y - 2][startX + 3] = IDS.AIR;
+
+                return;
+            }
+        }
+    }
+
     genPool(x, y) { for(let py=y; py<y+5; py++) for(let px=x-5; px<x+5; px++) if(px>0 && px<CHUNK_WIDTH && py>0 && py<CHUNK_HEIGHT) if(this.world[py][px] === IDS.AIR) this.world[py][px] = IDS.WATER; }
     genTree(x,y) { for(let i=1;i<5;i++) this.world[y-i][x]=IDS.WOOD; this.world[y-5][x]=IDS.LEAVES; this.world[y-5][x-1]=IDS.LEAVES; this.world[y-5][x+1]=IDS.LEAVES; this.world[y-6][x]=IDS.LEAVES; }
     worm(x,y,l) {
@@ -1240,13 +1346,38 @@ class Game {
         if(gx<0||gx>=CHUNK_WIDTH||gy<0||gy>=CHUNK_HEIGHT) return;
         if(Math.hypot(gx*32+16-(this.player.x+10), gy*32+16-(this.player.y+18)) > REACH_PX) return;
         let t=this.world[gy][gx];
-        if(t===IDS.CHEST) {
+        if(t===IDS.CHEST || t===IDS.CHEST_HOUSE || t === IDS.CHEST_VAULT) {
             this.world[gy][gx] = IDS.CHEST_EMPTY;
-            let r = Math.random(), loot = IDS.GOLD_BAR, amt=5, name = "Gold";
-            if(r<0.25) { loot=IDS.BOOTS; amt=1; name="Hermes Boots"; }
-            else if(r<0.5) { loot=IDS.CLOUD_BOTTLE; amt=1; name="Cloud in a Bottle"; }
-            else if(r<0.75) { loot=IDS.MAGIC_STAFF; amt=1; name="Magic Staff"; }
-            this.addItem(loot, amt); this.log("Found: " + name); return;
+            let loots = [];
+            if (t === IDS.CHEST_HOUSE) {
+                let r = Math.random();
+                if (r < 0.33) loots.push({id: IDS.IRON_SWORD, n: 1, name: "Old Sword"});
+                else if (r < 0.66) loots.push({id: IDS.IRON_ARMOR, n: 1, name: "Old Armor"});
+                else loots.push({id: IDS.BOOTS, n: 1, name: "Travel Boots"});
+                if (Math.random() < 0.5) loots.push({id: IDS.IRON_BAR, n: 5 + Math.floor(Math.random()*5), name: "Iron Bars"});
+            } else if (t === IDS.CHEST_VAULT) {
+                let r = Math.random();
+                if (r < 0.33) loots.push({id: IDS.GOLD_SWORD, n: 1, name: "Gilded Sword"});
+                else if (r < 0.66) loots.push({id: IDS.GOLD_ARMOR, n: 1, name: "Gilded Armor"});
+                else loots.push({id: IDS.CLOUD_BOTTLE, n: 1, name: "Cloud in a Bottle"});
+                if (Math.random() < 0.7) loots.push({id: IDS.GOLD_BAR, n: 8 + Math.floor(Math.random()*8), name: "Gold Bars"});
+            } else { // Normal chest
+                let r = Math.random();
+                if(r<0.25) loots.push({id: IDS.BOOTS, n: 1, name: "Hermes Boots"});
+                else if(r<0.5) loots.push({id: IDS.CLOUD_BOTTLE, n: 1, name: "Cloud in a Bottle"});
+                else if(r<0.75) loots.push({id: IDS.MAGIC_STAFF, n: 1, name: "Magic Staff"});
+                else loots.push({id: IDS.GOLD_BAR, n: 5, name: "Gold Bars"});
+            }
+
+            if (loots.length > 0) {
+                let foundMsg = "Found: ";
+                loots.forEach((l, index) => {
+                    this.addItem(l.id, l.n);
+                    foundMsg += `${l.name}` + (index < loots.length - 1 ? ', ' : '');
+                });
+                this.log(foundMsg);
+            }
+            return;
         }
         if(t===IDS.DOOR_CLOSED) { this.world[gy][gx]=IDS.DOOR_OPEN; this.sound.play('dig'); return; }
         if(t===IDS.DOOR_OPEN) { this.world[gy][gx]=IDS.DOOR_CLOSED; this.sound.play('dig'); return; }
