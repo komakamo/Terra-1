@@ -378,8 +378,8 @@ const PROPS = {
     [IDS.DOOR_ITEM]: { name:'Door', color:'#5d4037', type:'block', placeId:IDS.DOOR_CLOSED },
     [IDS.CHEST_ITEM]: { name:'Chest', color:'#ffeb3b', type:'block', placeId:IDS.CHEST_EMPTY },
     [IDS.HEART_ITEM]: { name:'Life Crystal', color:'#e91e63', type:'use', effect:'maxhp', val:20 },
-    [IDS.MUSHROOM_ITEM]: { name:'Mushroom', color:'#f44336', type:'use', effect:'heal', val:15 },
-    [IDS.GLOWING_MUSHROOM_ITEM]: { name:'Glowing Mushroom', color:'#00e5ff', type:'use', effect:'heal', val:25 },
+    [IDS.MUSHROOM_ITEM]: { name:'Mushroom', color:'#f44336', type:'use', effect:'heal', val:15, heal: true },
+    [IDS.GLOWING_MUSHROOM_ITEM]: { name:'Glowing Mushroom', color:'#00e5ff', type:'use', effect:'heal', val:25, heal: true },
     [IDS.SAND_ITEM]: { name:'Sand', color:'#fdd835', type:'block', placeId:IDS.SAND },
     [IDS.CACTUS_ITEM]: { name:'Cactus', color:'#43a047', type:'block', placeId:IDS.CACTUS },
     [IDS.EYE_SUMMON]: { name:'Suspicious Eye', color:'#fff', type:'summon' },
@@ -758,6 +758,18 @@ class Game {
         setTimeout(()=>d.style.opacity=0, 3000); setTimeout(()=>d.remove(), 4000);
     }
 
+    _generateTooltipHTML(p) {
+        let html = `<div class="tt-title">${p.name}</div>`;
+        if(p.damage) html += `<div class="tt-stat">Melee Damage: ${p.damage}</div>`;
+        if(p.power) html += `<div class="tt-stat">Pickaxe Power: ${p.power}%</div>`;
+        if(p.def) html += `<div class="tt-stat">Defense: ${p.def}</div>`;
+        if(p.heal) html += `<div class="tt-stat">Restores ${p.val} HP</div>`;
+        if(p.type === 'material') html += `<div class="tt-desc">Material</div>`;
+        if(p.placeId) html += `<div class="tt-desc">Can be placed</div>`;
+        if(p.station) html += `<div class="tt-desc">Crafting Station</div>`;
+        return html;
+    }
+
     updateTooltip(e) {
         const el = document.elementFromPoint(e.clientX, e.clientY);
         const tt = document.getElementById('tooltip');
@@ -777,16 +789,7 @@ class Game {
 
             if(item && item.id !== IDS.AIR) {
                 const p = PROPS[item.id];
-                let html = `<div class="tt-title">${p.name}</div>`;
-                if(p.damage) html += `<div class="tt-stat">Melee Damage: ${p.damage}</div>`;
-                if(p.power) html += `<div class="tt-stat">Pickaxe Power: ${p.power}%</div>`;
-                if(p.def) html += `<div class="tt-stat">Defense: ${p.def}</div>`;
-                if(p.heal) html += `<div class="tt-stat">Restores ${p.val} HP</div>`;
-                if(p.type === 'material') html += `<div class="tt-desc">Material</div>`;
-                if(p.placeId) html += `<div class="tt-desc">Can be placed</div>`;
-                if(p.station) html += `<div class="tt-desc">Crafting Station</div>`;
-                
-                tt.innerHTML = html;
+                tt.innerHTML = this._generateTooltipHTML(p);
                 tt.style.display = 'block';
                 tt.style.left = (e.clientX + 15) + 'px';
                 tt.style.top = (e.clientY + 15) + 'px';
@@ -1729,6 +1732,16 @@ function runTests() {
         game.player.hit(20);
         TestSuite.assertEquals(game.player.hp, 85, "Damage not calculated correctly with defense.");
         TestSuite.assert(game.player.invin > 0, "Invincibility frames not applied after being hit.");
+    });
+
+    TestSuite.test("Tooltip: Healing item shows heal amount", () => {
+        const game = new Game();
+        const mushroom = PROPS[IDS.MUSHROOM_ITEM];
+        const html = game._generateTooltipHTML(mushroom);
+        TestSuite.assert(
+            html.includes(`Restores ${mushroom.val} HP`),
+            `Tooltip for healing item should include heal amount. Got: ${html}`
+        );
     });
 
     return TestSuite.run();
