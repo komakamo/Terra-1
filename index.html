@@ -126,6 +126,11 @@
         .star.empty { background-color: #444; }
         .def-badge { color: #bbb; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 0 #000; margin-top: 4px; }
 
+        /* XP Bar */
+        #xp-bar-container { width: 150px; height: 12px; background: rgba(0,0,0,0.5); border: 1px solid #888; border-radius: 3px; margin-top: 5px; position: relative; }
+        #xp-bar-fill { height: 100%; background: #ffd700; border-radius: 2px; }
+        #level-display { color: #fff; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 0 #000; margin-top: 4px; }
+
         /* Boss Bar */
         #boss-bar-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 400px; height: 20px; background: #333; border: 2px solid #000; display: none; }
         #boss-bar-fill { width: 100%; height: 100%; background: #d32f2f; transition: width 0.1s; }
@@ -236,6 +241,10 @@
                 <div id="mana-row" class="bar-row"></div>
             </div>
             <div id="def-display" class="def-badge">Defense: 0</div>
+            <div id="level-display">Lv. 1</div>
+            <div id="xp-bar-container">
+                <div id="xp-bar-fill"></div>
+            </div>
             <div style="color:#ccc; font-size:12px; margin-top:5px; text-shadow:1px 1px 0 #000;">
                 [I] Inventory [E] Craft<br>
                 [R-Click] Equip/Place
@@ -634,13 +643,13 @@ class Projectile {
 class Entity {
     constructor(x, y, type) {
         this.x=x; this.y=y; this.type=type; this.dead=false; this.vx=0; this.vy=0; this.grounded=false; this.flash=0;
-        if(type==='slime') { this.w=24; this.h=18; this.hp=40; this.color='#2196f3'; this.dmg=8; }
-        else if(type==='zombie') { this.w=20; this.h=36; this.hp=60; this.color='#4caf50'; this.dmg=12; }
-        else if(type==='eye') { this.w=24; this.h=24; this.hp=40; this.color='#e53935'; this.dmg=10; this.fly=true; }
-        else if(type==='eater') { this.w=28; this.h=28; this.hp=50; this.color='#7b1fa2'; this.dmg=15; this.fly=true; }
-        else if(type==='boss') { this.w=60; this.h=60; this.hp=2000; this.maxHp=2000; this.color='#eee'; this.dmg=25; this.fly=true; this.boss=true; }
-        else if(type==='servant') { this.w=16; this.h=16; this.hp=15; this.color='#e53935'; this.dmg=8; this.fly=true; }
-        else if(type==='npc_guide') { this.w=20; this.h=36; this.hp=250; this.color='#ffeb3b'; this.dmg=0; this.friendly=true; }
+        if(type==='slime') { this.w=24; this.h=18; this.hp=40; this.color='#2196f3'; this.dmg=8; this.xpReward=5; }
+        else if(type==='zombie') { this.w=20; this.h=36; this.hp=60; this.color='#4caf50'; this.dmg=12; this.xpReward=8; }
+        else if(type==='eye') { this.w=24; this.h=24; this.hp=40; this.color='#e53935'; this.dmg=10; this.fly=true; this.xpReward=7; }
+        else if(type==='eater') { this.w=28; this.h=28; this.hp=50; this.color='#7b1fa2'; this.dmg=15; this.fly=true; this.xpReward=10; }
+        else if(type==='boss') { this.w=60; this.h=60; this.hp=2000; this.maxHp=2000; this.color='#eee'; this.dmg=25; this.fly=true; this.boss=true; this.xpReward=100; }
+        else if(type==='servant') { this.w=16; this.h=16; this.hp=15; this.color='#e53935'; this.dmg=8; this.fly=true; this.xpReward=2; }
+        else if(type==='npc_guide') { this.w=20; this.h=36; this.hp=250; this.color='#ffeb3b'; this.dmg=0; this.friendly=true; this.xpReward=0; }
         this.phase=1; this.timer=0; this.dir=1;
     }
     update(world, p, particles, texts, isNight, game) {
@@ -736,7 +745,11 @@ class Entity {
         texts.push(new TextEffect(this.x, this.y, d, '#fff'));
         game.hitStop = 4; game.sound.play('hit');
         if(this.hp<=0) {
-            this.dead=true; for(let i=0;i<6;i++) parts.push(new Particle(this.x+this.w/2, this.y+this.h/2, this.color, 5));
+            this.dead=true;
+            if (this.xpReward) {
+                 game.addXp(this.xpReward);
+            }
+            for(let i=0;i<6;i++) parts.push(new Particle(this.x+this.w/2, this.y+this.h/2, this.color, 5));
             if(this.type==='boss') {
                 game.flags.boss1Defeated = true; // Set flag for objective
                 texts.push(new TextEffect(this.x, this.y-30, "The spirits of darkness and light have been released.", '#a000e5'));
@@ -800,7 +813,8 @@ class Game {
             hp:100, maxHp:100, mana:20, maxMana:20, invin:0, respawn:{x:0,y:0}, swing:0,
             def: 0,
             inv: startInv,
-            armor: null, sel:0, canDoubleJump: false, hasBoots: false, jumps: 0
+            armor: null, sel:0, canDoubleJump: false, hasBoots: false, jumps: 0,
+            level: 1, xp: 0, nextLevelXp: 100
         };
         
         this.cam = {x:0, y:0}; this.keys = {}; this.mouse = {x:0, y:0, l:false, r:false};
@@ -885,6 +899,25 @@ class Game {
             this.log("目的達成！");
             this.updateObjectivePanel();
         }
+    }
+
+    addXp(amount) {
+        if (amount <= 0) return;
+        this.player.xp += amount;
+        this.texts.push(new TextEffect(this.player.x, this.player.y, `+${amount} XP`, '#ffd700'));
+
+        while (this.player.xp >= this.player.nextLevelXp) {
+            this.player.xp -= this.player.nextLevelXp;
+            this.player.level++;
+            this.player.nextLevelXp = Math.floor(this.player.nextLevelXp * 1.5);
+
+            // Stat increases
+            this.player.maxHp += 10;
+            this.player.hp = this.player.maxHp; // Heal to full on level up
+
+            this.texts.push(new TextEffect(this.player.x, this.player.y - 20, "LEVEL UP!", '#00ff00'));
+        }
+        this.uiUpd();
     }
     
     resize() { this.w=window.innerWidth; this.h=window.innerHeight; this.c.width=this.w; this.c.height=this.h; this.ctx.imageSmoothingEnabled=false; }
@@ -1586,6 +1619,12 @@ class Game {
         let nm=Math.ceil(this.player.maxMana/20), cm=Math.ceil(this.player.mana/20);
         for(let i=0;i<nm;i++) { let s=document.createElement('div'); s.className='star'+(i<cm?'':' empty'); mr.appendChild(s); }
         document.getElementById('def-display').innerText = `Defense: ${this.player.def}`;
+
+        // XP Bar & Level
+        document.getElementById('level-display').innerText = `Lv. ${this.player.level}`;
+        const xpPercent = (this.player.xp / this.player.nextLevelXp) * 100;
+        document.getElementById('xp-bar-fill').style.width = `${xpPercent}%`;
+
         if(this.ui.craft) this.rendRec();
         if(this.ui.inv) this.renderInventoryScreen();
     }
