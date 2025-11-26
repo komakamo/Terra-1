@@ -38,6 +38,22 @@
         .item-count { position: absolute; bottom: 2px; right: 4px; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 1px 1px 0 #000; pointer-events: none; }
         .item-icon { width: 24px; height: 24px; image-rendering: pixelated; pointer-events: none; }
 
+        /* Objective Panel */
+        #objective-panel {
+            position: absolute;
+            top: 60px; /* Below hotbar */
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            font-size: 14px;
+            max-width: 250px;
+            pointer-events: none;
+            z-index: 100;
+        }
+
         /* Inventory Screen */
         #inventory-screen {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -156,6 +172,7 @@
     </div>
 
     <div id="ui-layer">
+        <div id="objective-panel"></div>
         <div id="hotbar"></div>
         <div id="equip-slot" data-type="armor">
             <div id="equip-label">Armor</div>
@@ -426,6 +443,43 @@ const RECIPES = [
     { out:{id:IDS.EYE_SUMMON, n:1}, in:[{id:IDS.LENS, n:6}], station:IDS.WORKBENCH },
 ];
 
+const OBJECTIVES = [
+    {
+        text: "木材を10個集めて、ワークベンチを作ろう。",
+        condition: (game) => {
+            const hasItem = game.player.inv.some(i => i.id === IDS.WORKBENCH);
+            // This check is slow, but acceptable for this case.
+            const isPlaced = game.world.some(row => row.includes(IDS.WORKBENCH));
+            return hasItem || isPlaced;
+        }
+    },
+    {
+        text: "ワークベンチの近くでかまどを作ろう。\n(石x20, 木材x5, 松明x3)",
+        condition: (game) => {
+            const hasItem = game.player.inv.some(i => i.id === IDS.FURNACE);
+            const isPlaced = game.world.some(row => row.includes(IDS.FURNACE));
+            return hasItem || isPlaced;
+        }
+    },
+    {
+        text: "家を建ててガイドを住まわせよう。\n([H]キーで家の有効性を確認)",
+        condition: (game) => {
+            // Assumes checkHousing is modified to return a boolean
+            return game.checkHousing(true);
+        }
+    },
+    {
+        text: "鉄か金の装備を整えて、最初のボスを倒そう。",
+        condition: (game) => {
+            return game.flags && game.flags.boss1Defeated;
+        }
+    },
+    {
+        text: "目的達成！おめでとう！",
+        condition: (game) => false // This objective doesn't auto-complete
+    }
+];
+
 class SoundManager {
     constructor() {
         this.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -634,6 +688,7 @@ class Entity {
         if(this.hp<=0) {
             this.dead=true; for(let i=0;i<6;i++) parts.push(new Particle(this.x+this.w/2, this.y+this.h/2, this.color, 5));
             if(this.type==='boss') {
+                game.flags.boss1Defeated = true; // Set flag for objective
                 texts.push(new TextEffect(this.x, this.y-30, "The spirits of darkness and light have been released.", '#a000e5'));
                 game.triggerHardmode();
             }
@@ -701,13 +756,39 @@ class Game {
         this.time = 6000; this.dayLen = 24000; this.updLight = true; this.wTimer = 0;
         this.hitStop = 0;
 
+        // Objective System
+        this.currentObjectiveIndex = 0;
+        this.flags = {}; // For story flags like boss kills
+
         this.init();
         if(!this.loadGame()) { this.genWorld(); } else { this.log("Game Loaded!"); }
         
         // Init minimap size
         this.miniC.width = CHUNK_WIDTH; this.miniC.height = CHUNK_HEIGHT;
         
+        this.updateObjectivePanel(); // Initial objective display
         this.uiUpd(); this.loop();
+    }
+
+    updateObjectivePanel() {
+        const panel = document.getElementById('objective-panel');
+        if (this.currentObjectiveIndex < OBJECTIVES.length) {
+            panel.innerText = OBJECTIVES[this.currentObjectiveIndex].text;
+            panel.style.display = 'block';
+        } else {
+            panel.style.display = 'none';
+        }
+    }
+
+    checkObjectiveCompletion() {
+        if (this.currentObjectiveIndex >= OBJECTIVES.length) return;
+
+        const current = OBJECTIVES[this.currentObjectiveIndex];
+        if (current.condition(this)) {
+            this.currentObjectiveIndex++;
+            this.log("目的達成！");
+            this.updateObjectivePanel();
+        }
     }
     
     resize() { this.w=window.innerWidth; this.h=window.innerHeight; this.c.width=this.w; this.c.height=this.h; this.ctx.imageSmoothingEnabled=false; }
@@ -1059,7 +1140,7 @@ class Game {
         } else { this.toggleCraft(); }
     }
 
-    checkHousing() {
+    checkHousing(silent = false) {
         const px = Math.floor((this.player.x + this.player.w/2) / TILE_SIZE), py = Math.floor((this.player.y + this.player.h/2) / TILE_SIZE);
         let q = [{x:px, y:py}], visited = new Set([`${px},${py}`]), tiles = 0, walls = 0, lights = 0, doors = 0, enclosed = true;
         while(q.length > 0) {
@@ -1076,12 +1157,17 @@ class Game {
                 } else { enclosed = false; }
             });
         }
-        if(!enclosed) { this.log("Housing: Not enclosed."); return; }
-        if(tiles < 30) { this.log("Housing: Too small."); return; }
-        if(doors === 0) { this.log("Housing: No door."); return; }
-        if(lights === 0) { this.log("Housing: No light."); return; }
-        if(walls < tiles * 0.8) { this.log("Housing: Missing walls."); return; }
-        this.log("Housing: Suitable!");
+
+        const log = (msg) => { if (!silent) this.log(msg); };
+
+        if(!enclosed) { log("Housing: Not enclosed."); return false; }
+        if(tiles < 30) { log("Housing: Too small."); return false; }
+        if(doors === 0) { log("Housing: No door."); return false; }
+        if(lights === 0) { log("Housing: No light."); return false; }
+        if(walls < tiles * 0.8) { log("Housing: Missing walls."); return false; }
+
+        log("Housing: Suitable!");
+        return true;
     }
 
     jump() {
@@ -1321,6 +1407,8 @@ class Game {
         this.texts.forEach(t=>t.update()); this.texts=this.texts.filter(t=>t.life>0);
 
         if(this.updLight) this.calcLight();
+
+        this.checkObjectiveCompletion();
         
         p.hit = (dmg) => {
             if(p.invin>0) return;
