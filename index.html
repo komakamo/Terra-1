@@ -88,6 +88,26 @@
             border: 2px solid #446; border-radius: 8px; padding: 10px; color: white;
             pointer-events: auto; display: none; max-height: 60vh; overflow-y: auto; width: 280px; z-index: 1500;
         }
+        #crafting-tabs {
+            display: flex;
+            border-bottom: 1px solid #446;
+            margin-bottom: 5px;
+        }
+        .craft-tab {
+            padding: 8px 12px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            font-size: 13px;
+            background: rgba(0,0,0,0.3);
+        }
+        .craft-tab:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        .craft-tab.active {
+            background: rgba(80, 120, 180, 0.5);
+            font-weight: bold;
+        }
         .recipe { display: flex; align-items: center; padding: 6px; border-bottom: 1px solid #335; cursor: pointer; }
         .recipe:hover { background: rgba(255, 255, 255, 0.1); }
         .recipe.disabled { opacity: 0.4; cursor: not-allowed; }
@@ -152,10 +172,27 @@
             max-width: 80%; max-height: 70vh; overflow-y: auto;
             border-left: 5px solid #f44336;
         }
+        #mute-btn {
+            position: absolute;
+            top: 5px;
+            right: 200px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            font-size: 12px;
+            cursor: pointer;
+            pointer-events: auto;
+            z-index: 2000;
+        }
+        #mute-btn:hover {
+            background: #444;
+        }
     </style>
 </head>
 <body>
-
+    <audio id="bgm-day" loop src="assets/bgm_day.mp3"></audio>
     <canvas id="gameCanvas"></canvas>
 
     <!-- Error Screen -->
@@ -172,6 +209,7 @@
     </div>
 
     <div id="ui-layer">
+        <div id="mute-btn">Mute</div>
         <div id="objective-panel"></div>
         <div id="hotbar"></div>
         <div id="equip-slot" data-type="armor">
@@ -184,7 +222,13 @@
             <div id="inv-grid"></div>
         </div>
 
-        <div id="crafting-menu"><div style="text-align:center; border-bottom:1px solid #fff;">Crafting</div><div id="recipe-list"></div></div>
+        <div id="crafting-menu">
+            <div id="crafting-tabs">
+                <div class="craft-tab active" data-tab="craftable">作成可能</div>
+                <div class="craft-tab" data-tab="all">すべて</div>
+            </div>
+            <div id="recipe-list"></div>
+        </div>
         
         <div id="hud-info">
             <div id="stats-container">
@@ -738,6 +782,11 @@ class Game {
         // Sound
         this.sound = new SoundManager();
 
+        // BGM
+        this.bgm = document.getElementById('bgm-day');
+        this.bgm.volume = 0.5;
+
+
         // Expanded Inventory
         let startInv = [
             {id:IDS.WOOD_PICK, n:1}, {id:IDS.WOOD_SWORD, n:1}, {id:IDS.TORCH, n:10},
@@ -756,7 +805,7 @@ class Game {
         
         this.cam = {x:0, y:0}; this.keys = {}; this.mouse = {x:0, y:0, l:false, r:false};
         this.mining = {on:false, x:-1, y:-1, t:0, dur:0}; 
-        this.ui = { craft:false, inv:false };
+        this.ui = { craft:false, inv:false, craftTab: 'craftable' };
         this.invCursor = null; // Slot index selected for swapping
 
         this.time = 6000; this.dayLen = 24000; this.updLight = true; this.wTimer = 0;
@@ -865,6 +914,23 @@ class Game {
             this.keys[e.code]=false;
             if(e.code==='Space' && this.player.vy < -2) this.player.vy *= 0.5;
         };
+
+        // BGM Mute Button
+        const muteBtn = document.getElementById('mute-btn');
+        muteBtn.addEventListener('click', () => {
+            this.bgm.muted = !this.bgm.muted;
+            muteBtn.innerText = this.bgm.muted ? 'Unmute' : 'Mute';
+        });
+
+        // Crafting Tab Handler
+        document.querySelectorAll('.craft-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                this.ui.craftTab = tab.dataset.tab;
+                document.querySelectorAll('.craft-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                this.rendRec();
+            });
+        });
         
         // Tooltip Handler
         window.addEventListener('mousemove', (e) => {
@@ -1452,16 +1518,50 @@ class Game {
         return true;
     }
     rendRec() {
-        let l=document.getElementById('recipe-list'); l.innerHTML='';
-        let cx=Math.floor((this.player.x+10)/32), cy=Math.floor((this.player.y+18)/32);
-        let stations=[]; for(let y=cy-3;y<=cy+3;y++)for(let x=cx-3;x<=cx+3;x++) if(x>=0&&x<CHUNK_WIDTH&&y>=0&&y<CHUNK_HEIGHT && PROPS[this.world[y][x]] && PROPS[this.world[y][x]].station) stations.push(this.world[y][x]);
-        RECIPES.forEach(r=>{
+        const l = document.getElementById('recipe-list');
+        l.innerHTML = '';
+        const cx = Math.floor((this.player.x + 10) / 32);
+        const cy = Math.floor((this.player.y + 18) / 32);
+        const stations = [];
+        for (let y = cy - 3; y <= cy + 3; y++) {
+            for (let x = cx - 3; x <= cx + 3; x++) {
+                if (x >= 0 && x < CHUNK_WIDTH && y >= 0 && y < CHUNK_HEIGHT && PROPS[this.world[y][x]] && PROPS[this.world[y][x]].station) {
+                    stations.push(this.world[y][x]);
+                }
+            }
+        }
+
+        const recipesToDisplay = RECIPES.filter(r => {
             const can = this._canCraft(r, stations);
-            let txt="";
-            r.in.forEach(m=>{ txt+=`${PROPS[m.id].name} x${m.n} `; });
-            let d=document.createElement('div'); d.className='recipe'+(can?'':' disabled');
-            d.innerHTML=`<div class="recipe-icon" style="background:${PROPS[r.out.id].color}"></div><div class="recipe-details"><div><b>${PROPS[r.out.id].name}</b> x${r.out.n}</div><div style="color:#aaa">${txt}</div></div>`;
-            d.onclick=()=>{ if(can) { r.in.forEach(m=>this.addItem(m.id,-m.n)); this.addItem(r.out.id, r.out.n); this.rendRec(); } };
+            if (this.ui.craftTab === 'craftable') {
+                return can;
+            }
+            return true; // 'all' tab
+        });
+
+        if (recipesToDisplay.length === 0 && this.ui.craftTab === 'craftable') {
+            l.innerHTML = '<div style="color:#888; text-align:center; padding:10px;">作成可能なレシピがありません。</div>';
+            return;
+        }
+
+        recipesToDisplay.forEach(r => {
+            const can = this._canCraft(r, stations);
+            let txt = "";
+            r.in.forEach(m => {
+                const total = this.player.inv.filter(i => i.id === m.id).reduce((sum, i) => sum + i.n, 0);
+                const color = total >= m.n ? '#aaa' : '#f88'; // 足りない素材を赤く表示
+                txt += `<span style="color:${color}">${PROPS[m.id].name} x${m.n} </span>`;
+            });
+            let d = document.createElement('div');
+            d.className = 'recipe' + (can ? '' : ' disabled');
+            d.innerHTML = `<div class="recipe-icon" style="background:${PROPS[r.out.id].color}"></div><div class="recipe-details"><div><b>${PROPS[r.out.id].name}</b> x${r.out.n}</div><div style="color:#aaa">${txt}</div></div>`;
+            d.onclick = () => {
+                if (can) {
+                    r.in.forEach(m => this.addItem(m.id, -m.n));
+                    this.addItem(r.out.id, r.out.n);
+                    this.rendRec();
+                }
+            };
             l.appendChild(d);
         });
     }
@@ -1501,6 +1601,13 @@ class Game {
         }
         let isNight = this.time/this.dayLen<0.2 || this.time/this.dayLen>0.8;
         
+        // BGMの音量を昼夜で変更
+        if (isNight) {
+            this.bgm.volume = 0.2;
+        } else {
+            this.bgm.volume = 0.5;
+        }
+
         if(this.enemies.length< (isNight?8:4) && Math.random()<0.01) {
             let ex=Math.floor(this.player.x/32) + (Math.random()>0.5?25:-25);
             if(ex>0&&ex<CHUNK_WIDTH) {
@@ -1771,7 +1878,9 @@ window.onload = () => {
     const startScreen = document.getElementById('start-screen');
     const startHandler = () => {
         startScreen.style.display = 'none';
-        new Game();
+        const game = new Game();
+        // BGM再生開始
+        game.bgm.play().catch(e => console.error("BGM playback failed:", e));
         // Remove listener to prevent re-triggering
         startScreen.removeEventListener('click', startHandler);
     };
