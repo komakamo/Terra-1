@@ -18,11 +18,17 @@
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.9); z-index: 9999;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            color: white; pointer-events: auto; cursor: pointer;
+            color: white; pointer-events: auto;
         }
         #start-screen h1 { margin: 0 0 20px 0; font-size: 40px; text-shadow: 2px 2px 0 #4caf50; }
-        #start-screen p { font-size: 20px; animation: blink 1s infinite; }
-        @keyframes blink { 50% { opacity: 0.5; } }
+        #difficulty-select { margin-top: 20px; display: flex; gap: 20px; }
+        .difficulty-btn {
+            padding: 10px 20px; font-size: 18px; color: white; border: 2px solid white;
+            background: rgba(255,255,255,0.1); cursor: pointer; border-radius: 5px;
+            transition: background 0.2s, transform 0.2s;
+        }
+        .difficulty-btn:hover { background: rgba(255,255,255,0.3); transform: scale(1.05); }
+
 
         /* Hotbar */
         #hotbar { position: absolute; top: 10px; left: 10px; display: flex; gap: 4px; pointer-events: auto; }
@@ -53,6 +59,37 @@
             pointer-events: none;
             z-index: 100;
         }
+
+        /* Status Effects */
+        #status-effects-container {
+            position: absolute;
+            top: 55px;
+            left: 10px;
+            display: flex;
+            gap: 4px;
+            z-index: 101; /* Above objective panel */
+        }
+        .status-icon {
+            width: 28px;
+            height: 28px;
+            border: 1px solid #888;
+            background: rgba(0,0,0,0.7);
+            border-radius: 4px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            position: relative;
+        }
+        .status-icon .duration {
+            position: absolute;
+            bottom: 0;
+            right: 2px;
+            text-shadow: 1px 1px 1px #000;
+        }
+
 
         /* Inventory Screen */
         #inventory-screen {
@@ -210,11 +247,16 @@
     <!-- Added Start Screen for Audio Context compliance -->
     <div id="start-screen">
         <h1>Mini Terraria</h1>
-        <p>Click to Start Game</p>
+        <div id="difficulty-select">
+            <div class="difficulty-btn" data-difficulty="normal">Normal</div>
+            <div class="difficulty-btn" data-difficulty="expert">Expert</div>
+        </div>
+        <p style="margin-top: 40px; font-size: 14px; color: #aaa;">Select a difficulty to start a new world or load a save.</p>
     </div>
 
     <div id="ui-layer">
         <div id="mute-btn">Mute</div>
+        <div id="status-effects-container"></div>
         <div id="objective-panel"></div>
         <div id="hotbar"></div>
         <div id="equip-slot" data-type="armor">
@@ -641,7 +683,7 @@ class Projectile {
 }
 
 class Entity {
-    constructor(x, y, type) {
+    constructor(x, y, type, game) {
         this.x=x; this.y=y; this.type=type; this.dead=false; this.vx=0; this.vy=0; this.grounded=false; this.flash=0;
         if(type==='slime') { this.w=24; this.h=18; this.hp=40; this.color='#2196f3'; this.dmg=8; this.xpReward=5; }
         else if(type==='zombie') { this.w=20; this.h=36; this.hp=60; this.color='#4caf50'; this.dmg=12; this.xpReward=8; }
@@ -651,6 +693,13 @@ class Entity {
         else if(type==='servant') { this.w=16; this.h=16; this.hp=15; this.color='#e53935'; this.dmg=8; this.fly=true; this.xpReward=2; }
         else if(type==='npc_guide') { this.w=20; this.h=36; this.hp=250; this.color='#ffeb3b'; this.dmg=0; this.friendly=true; this.xpReward=0; }
         this.phase=1; this.timer=0; this.dir=1;
+
+        if (game && game.settings.difficulty === 'expert' && !this.friendly) {
+            this.hp *= 1.5;
+            this.dmg *= 1.3;
+            this.xpReward *= 1.5;
+            if(this.boss) this.maxHp *= 1.5;
+        }
     }
     update(world, p, particles, texts, isNight, game) {
         if(this.dead) return;
@@ -686,7 +735,7 @@ class Entity {
             if(this.phase===1) {
                 let tx=p.x, ty=p.y-200;
                 this.vx+=(tx-this.x)*0.005; this.vy+=(ty-this.y)*0.005;
-                if(this.timer%200===0) game.enemies.push(new Entity(this.x, this.y, 'servant'));
+                if(this.timer%200===0) game.enemies.push(new Entity(this.x, this.y, 'servant', game));
             } else {
                 if(this.timer%120<40) { if(this.timer%120===0) { let a=Math.atan2(dy,dx); this.vx=Math.cos(a)*12; this.vy=Math.sin(a)*12; } }
                 else { this.vx*=0.9; this.vy*=0.9; }
@@ -700,7 +749,12 @@ class Entity {
         this.y+=this.vy; this.grounded=false; this.collide(world, false);
         if(this.y>CHUNK_HEIGHT*TILE_SIZE) { if(!this.friendly) this.dead=true; else { this.x=p.x; this.y=p.y; } }
         if(this.flash>0) this.flash--;
-        if(!this.dead && !this.friendly && this.rectCollide(p)) p.hit(this.dmg, this.x);
+        if(!this.dead && !this.friendly && this.rectCollide(p)) {
+            game.playerHit(this.dmg);
+            if (this.type === 'zombie' && Math.random() < 0.2) {
+                game.addStatusEffect('slow', 180, 0.5); // 3 seconds, 50% speed
+            }
+        }
     }
     wallInFront(world, dir) {
         let tx=Math.floor((this.x+this.w/2+dir*20)/TILE_SIZE), ty=Math.floor((this.y+this.h-5)/TILE_SIZE);
@@ -814,9 +868,11 @@ class Game {
             def: 0,
             inv: startInv,
             armor: null, sel:0, canDoubleJump: false, hasBoots: false, jumps: 0,
-            level: 1, xp: 0, nextLevelXp: 100
+            level: 1, xp: 0, nextLevelXp: 100,
+            statusEffects: [] // {type, duration, power}
         };
         
+        this.settings = { difficulty: 'normal' };
         this.cam = {x:0, y:0}; this.keys = {}; this.mouse = {x:0, y:0, l:false, r:false};
         this.mining = {on:false, x:-1, y:-1, t:0, dur:0}; 
         this.ui = { craft:false, inv:false, craftTab: 'craftable' };
@@ -830,13 +886,14 @@ class Game {
         this.flags = {}; // For story flags like boss kills
 
         this.init();
-        if(!this.loadGame()) { this.genWorld(); } else { this.log("Game Loaded!"); }
+        // World gen is now handled by the start screen button handler
+        // if(!this.loadGame()) { this.genWorld(); } else { this.log("Game Loaded!"); }
         
         // Init minimap size
         this.miniC.width = CHUNK_WIDTH; this.miniC.height = CHUNK_HEIGHT;
         
         this.updateObjectivePanel(); // Initial objective display
-        this.uiUpd(); this.loop();
+        this.uiUpd();
     }
 
     updateObjectivePanel() {
@@ -1134,18 +1191,21 @@ class Game {
     }
 
     saveGame() {
-        const data = { world: this.world, walls: this.walls, player: this.player, time: this.time, enemies: this.enemies.map(e => ({ x:e.x, y:e.y, type:e.type, hp:e.hp, dead:e.dead, phase:e.phase })) };
+        const data = { settings: this.settings, world: this.world, walls: this.walls, player: this.player, time: this.time, enemies: this.enemies.map(e => ({ x:e.x, y:e.y, type:e.type, hp:e.hp, dead:e.dead, phase:e.phase })) };
         try { localStorage.setItem('miniTerrariaSave', JSON.stringify(data)); this.log("Game Saved!"); } catch(e) { this.log("Save failed"); }
     }
 
     loadGame() {
         const raw = localStorage.getItem('miniTerrariaSave'); if(!raw) return false;
         try {
-            const d = JSON.parse(raw); this.world = d.world; this.walls = d.walls; this.player = d.player; this.time = d.time || 6000;
+            const d = JSON.parse(raw);
+            this.settings = d.settings || { difficulty: 'normal' };
+            this.world = d.world; this.walls = d.walls; this.player = d.player; this.time = d.time || 6000;
             // Ensure inv size compatibility
             while(this.player.inv.length < INV_SIZE) this.player.inv.push({id:IDS.AIR, n:0});
+            if (!this.player.statusEffects) this.player.statusEffects = []; // Compatibility for old saves
             
-            this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
+            this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type, this); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
             this.calcLight(); this.uiUpd(); return true;
         } catch(e) { console.error(e); return false; }
     }
@@ -1239,7 +1299,7 @@ class Game {
             if(this.world[cy][cx]===IDS.AIR && PROPS[this.world[cy+1][cx]].solid) this.world[cy][cx] = IDS.CHEST;
         }
         this.player.x = (CHUNK_WIDTH/2)*32; this.player.y = (hMap[Math.floor(CHUNK_WIDTH/2)]-5)*32;
-        this.enemies.push(new Entity(this.player.x + 100, this.player.y, 'npc_guide'));
+        this.enemies.push(new Entity(this.player.x + 100, this.player.y, 'npc_guide', this));
 
         this.generateAbandonedHouse(hMap);
         this.generateTreasureVault();
@@ -1468,6 +1528,11 @@ class Game {
                 else loots.push({id: IDS.GOLD_BAR, n: 5, name: "Gold Bars"});
             }
 
+            // Expert mode exclusive content
+            if (this.settings.difficulty === 'expert') {
+                loots.push({id: IDS.GOLD_BAR, n: 5 + Math.floor(Math.random() * 5), name: "Expert Bonus"});
+            }
+
             if (loots.length > 0) {
                 let foundMsg = "Found: ";
                 loots.forEach((l, index) => {
@@ -1502,7 +1567,11 @@ class Game {
         }
     }
     
-    calcDef() { this.player.def = 0; if(this.player.armor) this.player.def = PROPS[this.player.armor].def; this.uiUpd(); }
+    calcDef() {
+        let baseDef = 0; if(this.player.armor) baseDef = PROPS[this.player.armor].def;
+        this.player.def = this.getModifiedStat('def', baseDef);
+        this.uiUpd();
+    }
     rectCol(x1,y1,w1,h1, x2,y2,w2,h2) { return x1<x2+w2 && x1+w1>x2 && y1<y2+h2 && y1+h1>y2; }
     createPart(gx,gy,c) { for(let i=0;i<5;i++) this.parts.push(new Particle(gx*32+16, gy*32+16, c, 4)); }
     consItem() {
@@ -1598,7 +1667,39 @@ class Game {
             l.appendChild(d);
         });
     }
+
+    renderStatusEffects() {
+        const container = document.getElementById('status-effects-container');
+        container.innerHTML = '';
+
+        // アイコンの定義
+        const effectIcons = {
+            poison: { background: '#4caf50', text: '毒' },
+            burn: { background: '#f44336', text: '火' },
+            slow: { background: '#2196f3', text: '鈍' },
+            curse: { background: '#4a148c', text: '呪' },
+            attackUP: { background: '#ffd700', text: '攻' },
+            defenseUP: { background: '#9e9e9e', text: '防' },
+            moveSpeedUP: { background: '#8bc34a', text: '速' },
+        };
+
+        this.player.statusEffects.forEach(effect => {
+            const iconInfo = effectIcons[effect.type] || { background: '#ccc', text: '？' };
+            const remainingSeconds = Math.ceil(effect.duration / 60);
+
+            const iconDiv = document.createElement('div');
+            iconDiv.className = 'status-icon';
+            iconDiv.style.background = iconInfo.background;
+            iconDiv.innerHTML = `
+                <span>${iconInfo.text}</span>
+                <span class="duration">${remainingSeconds}</span>
+            `;
+            container.appendChild(iconDiv);
+        });
+    }
+
     uiUpd() {
+        this.renderStatusEffects();
         let b=document.getElementById('hotbar'); b.innerHTML='';
         // Only show first 9 in hotbar
         for(let i=0; i<9; i++) {
@@ -1654,12 +1755,13 @@ class Game {
                 if(tile===IDS.EBONSTONE || this.world[Math.floor(this.player.y/32)+5][ex]===IDS.EBONSTONE) type='eater'; else if(isNight) type=Math.random()>0.5?'zombie':'eye';
                 let ey=0; while(ey<CHUNK_HEIGHT && !PROPS[this.world[ey][ex]].solid) ey++;
                 if(type==='eye'||type==='eater') ey = Math.floor(this.player.y/32)-10;
-                if(ey<CHUNK_HEIGHT) this.enemies.push(new Entity(ex*32, (ey-2)*32, type));
+                if(ey<CHUNK_HEIGHT) this.enemies.push(new Entity(ex*32, (ey-2)*32, type, this));
             }
         }
 
         let p=this.player;
-        let speed = p.hasBoots ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
+        let baseSpeed = p.hasBoots ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
+        let speed = this.getModifiedStat('speed', baseSpeed);
         if(this.keys['KeyA']) { p.vx=-speed; p.dir=-1; p.frame+=0.2; } else if(this.keys['KeyD']) { p.vx=speed; p.dir=1; p.frame+=0.2; } else { p.vx*=0.8; p.frame=0; }
         
         let tileAt = this.world[Math.floor((p.y+p.h/2)/TILE_SIZE)][Math.floor((p.x+p.w/2)/TILE_SIZE)];
@@ -1668,7 +1770,7 @@ class Game {
 
         p.x+=p.vx; this.collide(p, true);
         p.y+=p.vy; if(p.grounded) p.jumps=0; p.grounded=false; this.collide(p, false);
-        if(p.x<0) p.x=0; if(p.y>CHUNK_HEIGHT*32) { p.hp=0; p.hit(0); }
+        if(p.x<0) p.x=0; if(p.y>CHUNK_HEIGHT*32) { p.hp=0; this.playerHit(0); }
         this.cam.x += (p.x - this.w/2 - this.cam.x)*0.1;
         this.cam.y += (p.y - this.h/2 - this.cam.y)*0.1;
 
@@ -1682,19 +1784,12 @@ class Game {
         this.projs.forEach(pr=>pr.update(this.world, this.enemies, this.parts, this.texts, this));
         this.parts.forEach(pt=>pt.update()); this.parts=this.parts.filter(pt=>pt.life>0);
         this.texts.forEach(t=>t.update()); this.texts=this.texts.filter(t=>t.life>0);
+        this.updateStatusEffects();
+        this.renderStatusEffects(); // Update UI every frame for smooth countdown
 
         if(this.updLight) this.calcLight();
 
         this.checkObjectiveCompletion();
-        
-        p.hit = (dmg) => {
-            if(p.invin>0) return;
-            let actual = Math.max(1, dmg - p.def);
-            p.hp-=actual; p.invin=60; p.vy=-4;
-            this.hitStop = 10; 
-            this.texts.push(new TextEffect(p.x, p.y, -actual, 'red')); this.uiUpd();
-            if(p.hp<=0) { p.hp=p.maxHp; p.x=p.respawn.x; p.y=p.respawn.y; p.vx=0; p.vy=0; }
-        };
     }
     
     collide(obj, isX) {
@@ -1708,16 +1803,18 @@ class Game {
         
         if (isX) {
             for (let y = t; y <= b; y++) {
-                // For horizontal, platforms are NOT solid.
-                // Check strictly solid blocks.
-                let pR = getP(r, y);
+                 let pR = getP(r, y);
                 if (obj.vx > 0 && pR && pR.solid) {
+                    if (pR.damage) this.playerHit(pR.damage);
+                    if (this.world[y][r] === IDS.LAVA) this.addStatusEffect('burn', 120, 2);
                     obj.x = r * 32 - obj.w - 0.1;
                     obj.vx = 0;
                     break;
                 }
                 let pL = getP(l, y);
                 if (obj.vx < 0 && pL && pL.solid) {
+                     if (pL.damage) this.playerHit(pL.damage);
+                    if (this.world[y][l] === IDS.LAVA) this.addStatusEffect('burn', 120, 2);
                     obj.x = (l + 1) * 32 + 0.1;
                     obj.vx = 0;
                     break;
@@ -1739,13 +1836,18 @@ class Game {
             else if(obj.vy<0) {
                 // Head check
                 let pL = getP(l,t), pR = getP(r,t);
-                if((pL&&pL.solid) || (pR&&pR.solid)) { obj.y=(t+1)*32; obj.vy=0; }
+                if((pL&&pL.solid) || (pR&&pR.solid)) {
+                    if (pL.damage) this.playerHit(pL.damage);
+                    if (this.world[t][l] === IDS.LAVA) this.addStatusEffect('burn', 120, 2);
+                    obj.y=(t+1)*32; obj.vy=0;
+                }
             }
         }
     }
     meleeAttack() {
         let p=this.player; let cx=p.x+p.w/2+p.dir*20, cy=p.y+p.h/2;
-        let dmg = PROPS[p.inv[p.sel].id].damage || 5;
+        let baseDmg = PROPS[p.inv[p.sel].id].damage || 5;
+        let dmg = this.getModifiedStat('damage', baseDmg);
         this.enemies.forEach(e=>{ if(!e.friendly && Math.abs(e.x+e.w/2 - cx)<40 && Math.abs(e.y+e.h/2 - cy)<40) e.takeDamage(dmg, p.x, this.parts, this.texts, this); });
     }
 
@@ -1869,6 +1971,16 @@ class Game {
         this.enemies.forEach(e=>e.draw(this.ctx,0,0)); this.projs.forEach(p=>p.draw(this.ctx,0,0));
         this.parts.forEach(p=>p.draw(this.ctx,0,0)); this.texts.forEach(t=>t.draw(this.ctx,0,0));
         
+        // Render status effect visual feedback on player
+        const hasPoison = this.player.statusEffects.some(e => e.type === 'poison');
+        const hasBurn = this.player.statusEffects.some(e => e.type === 'burn');
+        if (hasPoison) { this.ctx.filter = 'sepia(1) saturate(4) hue-rotate(50deg)'; }
+        // 燃焼エフェクト：プレイヤーから炎のパーティクルを出す
+        if (hasBurn && this.time % 5 === 0) {
+            this.parts.push(new Particle(this.player.x + Math.random() * this.player.w, this.player.y + Math.random() * this.player.h, '#ff8c00', 1, 0.4));
+        }
+
+
         let p=this.player, x=p.x, y=p.y;
         let anim=Math.sin(p.frame)*4;
         this.ctx.save(); if(p.dir===-1){this.ctx.translate(x+p.w/2, y+p.h/2); this.ctx.scale(-1,1); this.ctx.translate(-(x+p.w/2), -(y+p.h/2));}
@@ -1895,10 +2007,104 @@ class Game {
         }
         this.ctx.restore();
 
+        this.ctx.filter = 'none'; // Reset filter
+
         let mx=Math.floor((this.mouse.x+this.cam.x)/32), my=Math.floor((this.mouse.y+this.cam.y)/32);
         this.ctx.strokeStyle='rgba(255,255,255,0.5)'; this.ctx.lineWidth=2; this.ctx.strokeRect(mx*32, my*32, 32,32);
         this.ctx.restore();
     }
+
+    // プレイヤーにステータス効果を付与する
+    addStatusEffect(type, duration, power = 0) {
+        const existingEffect = this.player.statusEffects.find(e => e.type === type);
+        if (existingEffect) {
+            // 既に同じ効果がある場合、効果時間が長い方で上書きする
+            if (duration > existingEffect.duration) {
+                existingEffect.duration = duration;
+                existingEffect.power = power;
+            }
+        } else {
+            this.player.statusEffects.push({ type, duration, power });
+        }
+        this.calcDef(); // Recalculate stats immediately
+        this.uiUpd();
+    }
+
+    // プレイヤーのステータス効果を毎フレーム更新する
+    updateStatusEffects() {
+        const p = this.player;
+        let effectsChanged = false;
+
+        for (let i = p.statusEffects.length - 1; i >= 0; i--) {
+            const effect = p.statusEffects[i];
+            effect.duration--;
+
+            // DoT (Damage over Time) などの効果を適用
+            if (effect.type === 'poison' && effect.duration % 60 === 0) {
+                const damage = effect.power || 1;
+                p.hp -= damage;
+                this.texts.push(new TextEffect(p.x, p.y, `${damage}`, '#00ff00'));
+            }
+             if (effect.type === 'burn' && effect.duration % 30 === 0) {
+                const damage = effect.power || 1;
+                p.hp -= damage;
+                this.texts.push(new TextEffect(p.x, p.y, `${damage}`, '#ff8c00'));
+            }
+             if (effect.type === 'curse' && effect.duration % 120 === 0) {
+                 if (p.hp > 1) {
+                    p.hp -= 1;
+                    this.texts.push(new TextEffect(p.x, p.y, `1`, '#4a148c'));
+                 }
+            }
+
+
+            if (effect.duration <= 0) {
+                p.statusEffects.splice(i, 1);
+                effectsChanged = true;
+            }
+        }
+
+        if (effectsChanged) {
+            this.calcDef(); // 防御力などの再計算
+            this.uiUpd(); // 効果が切れたらUIを更新
+        }
+    }
+
+    playerHit(dmg) {
+        const p = this.player;
+        if(p.invin>0) return;
+        let actual = Math.max(1, dmg - p.def);
+        p.hp-=actual; p.invin=60; p.vy=-4;
+        this.hitStop = 10;
+        this.texts.push(new TextEffect(p.x, p.y, -actual, 'red')); this.uiUpd();
+        if(p.hp<=0) { p.hp=p.maxHp; p.x=p.respawn.x; p.y=p.respawn.y; p.vx=0; p.vy=0; }
+    }
+
+    // ステータス効果（バフ・デバフ）を考慮した最終的なステータス値を取得する
+    getModifiedStat(statName, baseValue) {
+        let value = baseValue;
+        const p = this.player;
+
+        for (const effect of p.statusEffects) {
+            switch (effect.type) {
+                case 'moveSpeedUP':
+                    if (statName === 'speed') value *= effect.power;
+                    break;
+                case 'slow':
+                    if (statName === 'speed') value *= effect.power; // 例: power = 0.5
+                    break;
+                case 'attackUP':
+                    if (statName === 'damage') value *= effect.power;
+                    break;
+                case 'defenseUP':
+                    if (statName === 'def') value += effect.power; // 防御力は加算
+                    break;
+            }
+        }
+        return value;
+    }
+
+
     loop() { this.update(); this.draw(); requestAnimationFrame(()=>this.loop()); }
 }
 
@@ -1915,20 +2121,51 @@ window.onload = () => {
     }
 
     const startScreen = document.getElementById('start-screen');
-    const startHandler = () => {
+    const difficultyButtons = document.querySelectorAll('.difficulty-btn');
+
+    const startGame = (difficulty) => {
         startScreen.style.display = 'none';
         const game = new Game();
-        // BGM再生開始
+        window.game = game; // Expose game instance for testing
+        game.settings.difficulty = difficulty;
+
+        // 既存のセーブデータがあるか試みる
+        if (!game.loadGame()) {
+            // なければ新しいワールドを生成
+            game.genWorld();
+        }
+
+        // 難易度をセーブデータに合わせる（ロードした場合）
+        if (game.settings.difficulty !== difficulty) {
+             console.log(`Loaded game with difficulty: ${game.settings.difficulty}. Overriding selection.`);
+        }
+
+        game.log(`World started in ${game.settings.difficulty} mode.`);
+        game.updateObjectivePanel();
+        game.uiUpd();
+        game.loop();
+
         game.bgm.play().catch(e => console.error("BGM playback failed:", e));
-        // Remove listener to prevent re-triggering
-        startScreen.removeEventListener('click', startHandler);
     };
-    startScreen.addEventListener('click', startHandler);
+
+    difficultyButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const difficulty = button.dataset.difficulty;
+            startGame(difficulty);
+        });
+    });
 };
+
 
 function runTests() {
     console.log("Running automated tests...");
 
+    // Helper to create a game instance with a generated world for testing
+    function createTestGame() {
+        const game = new Game();
+        game.genWorld();
+        return game;
+    }
     const TestSuite = {
         tests: [],
         total: 0,
@@ -2017,14 +2254,14 @@ function runTests() {
     });
 
     TestSuite.test("Inventory: addItem to empty slot", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv.forEach(s => {s.id=IDS.AIR; s.n=0;});
         game.addItem(IDS.WOOD, 10);
         TestSuite.assertDeepEquals(game.player.inv[0], {id:IDS.WOOD, n:10}, "Item not added to empty slot correctly.");
     });
 
     TestSuite.test("Inventory: addItem stacking", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv.forEach(s => {s.id=IDS.AIR; s.n=0;});
         game.player.inv[0] = {id:IDS.WOOD, n:5};
         game.addItem(IDS.WOOD, 10);
@@ -2032,7 +2269,7 @@ function runTests() {
     });
 
     TestSuite.test("Inventory: addItem with full inventory", () => {
-        const game = new Game();
+        const game = createTestGame();
         for (let i = 0; i < game.player.inv.length; i++) {
             game.player.inv[i] = {id: IDS.STONE, n: 1};
         }
@@ -2041,28 +2278,28 @@ function runTests() {
     });
 
     TestSuite.test("Crafting: Can craft with materials", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv = [{id:IDS.WOOD, n:10}];
         const recipe = { in: [{id:IDS.WOOD, n:10}] };
         TestSuite.assert(game._canCraft(recipe, []), "Should be able to craft with enough materials.");
     });
 
     TestSuite.test("Crafting: Cannot craft without materials", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv = [{id:IDS.WOOD, n:5}];
         const recipe = { in: [{id:IDS.WOOD, n:10}] };
         TestSuite.assert(!game._canCraft(recipe, []), "Should not be able to craft without enough materials.");
     });
 
     TestSuite.test("Crafting: Cannot craft without station", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv = [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}];
         const recipe = { in: [{id:IDS.STONE, n:20}, {id:IDS.WOOD, n:5}, {id:IDS.TORCH, n:3}], station: IDS.WORKBENCH };
         TestSuite.assert(!game._canCraft(recipe, []), "Should not be able to craft without the required station.");
     });
 
     TestSuite.test("Crafting: Can craft with materials in multiple stacks", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.inv = [{id:IDS.WOOD, n:5}, {id:IDS.WOOD, n:5}];
         const recipe = { in: [{id:IDS.WOOD, n:10}] };
         TestSuite.assert(game._canCraft(recipe, []), "Should be able to craft with materials from multiple stacks.");
@@ -2070,6 +2307,8 @@ function runTests() {
 
     TestSuite.test("Vertical Collision", () => {
         const game = new Game();
+        // Initialize an empty world for this specific test
+        game.world = new Array(CHUNK_HEIGHT).fill(0).map(() => new Array(CHUNK_WIDTH).fill(IDS.AIR));
         const collide = game.collide.bind(game);
         const groundY = 10;
         game.world[groundY][10] = IDS.STONE;
@@ -2093,16 +2332,16 @@ function runTests() {
     });
 
     TestSuite.test("Combat: Player takes damage", () => {
-        const game = new Game();
+        const game = createTestGame();
         game.player.hp = 100;
         game.player.def = 5;
-        game.player.hit(20);
+        game.playerHit(20);
         TestSuite.assertEquals(game.player.hp, 85, "Damage not calculated correctly with defense.");
         TestSuite.assert(game.player.invin > 0, "Invincibility frames not applied after being hit.");
     });
 
     TestSuite.test("Tooltip: Healing item shows heal amount", () => {
-        const game = new Game();
+        const game = createTestGame();
         const mushroom = PROPS[IDS.MUSHROOM_ITEM];
         const html = game._generateTooltipHTML(mushroom);
         TestSuite.assert(
