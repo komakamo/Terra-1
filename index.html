@@ -29,6 +29,26 @@
         }
         .difficulty-btn:hover { background: rgba(255,255,255,0.3); transform: scale(1.05); }
 
+        #save-prompt {
+            margin-top: 30px;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 15px 20px;
+            border-radius: 8px;
+            max-width: 420px;
+        }
+        #save-prompt-message { text-align: center; line-height: 1.6; }
+        #save-prompt-diff { color: #ffd54f; font-weight: bold; text-align: center; }
+        .save-actions { display: flex; gap: 12px; }
+        .save-btn { padding: 10px 16px; border-radius: 6px; border: 2px solid #fff; background: rgba(0,0,0,0.4); color: #fff; cursor: pointer; min-width: 120px; }
+        .save-btn.primary { background: linear-gradient(135deg, #4caf50, #2e7d32); }
+        .save-btn.warning { border-color: #ff9800; color: #ff9800; }
+        .save-btn:hover { filter: brightness(1.1); }
+
 
         /* Hotbar */
         #hotbar { position: absolute; top: 10px; left: 10px; display: flex; gap: 4px; pointer-events: auto; }
@@ -252,6 +272,15 @@
             <div class="difficulty-btn" data-difficulty="expert">Expert</div>
         </div>
         <p style="margin-top: 40px; font-size: 14px; color: #aaa;">Select a difficulty to start a new world or load a save.</p>
+        <div id="save-prompt">
+            <div id="save-prompt-message">セーブデータが見つかりました。どちらで始めますか？</div>
+            <div id="save-prompt-diff"></div>
+            <div class="save-actions">
+                <button id="start-fresh-btn" class="save-btn warning">新しく始める</button>
+                <button id="continue-btn" class="save-btn primary">続きから</button>
+            </div>
+            <div style="font-size:12px; color:#ccc;">※「新しく始める」を選ぶと現在のセーブは消去されます。</div>
+        </div>
     </div>
 
     <div id="ui-layer">
@@ -2132,26 +2161,60 @@ window.onload = () => {
 
     const startScreen = document.getElementById('start-screen');
     const difficultyButtons = document.querySelectorAll('.difficulty-btn');
+    const savePrompt = document.getElementById('save-prompt');
+    const savePromptMessage = document.getElementById('save-prompt-message');
+    const savePromptDiff = document.getElementById('save-prompt-diff');
+    const startFreshBtn = document.getElementById('start-fresh-btn');
+    const continueBtn = document.getElementById('continue-btn');
 
-    const startGame = (difficulty) => {
+    let pendingDifficulty = null;
+
+    const startGame = (difficulty, loadSave = false) => {
         startScreen.style.display = 'none';
+        savePrompt.style.display = 'none';
+
         const game = new Game();
         window.game = game; // Expose game instance for testing
+
         game.settings.difficulty = difficulty;
 
-        // 既存のセーブデータがあるか試みる
-        if (!game.loadGame()) {
-            // なければ新しいワールドを生成
+        const panelNotes = [];
+        const logEntries = [];
+
+        if (loadSave) {
+            const loaded = game.loadGame();
+            if (loaded) {
+                logEntries.push(`セーブデータをロードしました。(難易度: ${game.settings.difficulty})`);
+                if (game.settings.difficulty !== difficulty) {
+                    const diffNote = `選択: ${difficulty} / セーブ: ${game.settings.difficulty}`;
+                    savePromptDiff.textContent = diffNote;
+                    panelNotes.push(`難易度が異なります - ${diffNote}`);
+                    logEntries.push('選択した難易度とセーブデータの難易度が異なるため、セーブデータの設定で続行します。');
+                } else {
+                    panelNotes.push(`難易度「${game.settings.difficulty}」で続きから開始します。`);
+                }
+            } else {
+                logEntries.push('セーブデータのロードに失敗したため、新しく世界を生成します。');
+                game.settings.difficulty = difficulty;
+                panelNotes.push('新しく冒険を開始しました。');
+                game.genWorld();
+            }
+        } else {
+            localStorage.removeItem('miniTerrariaSave');
+            panelNotes.push(`難易度「${difficulty}」で新規ワールドを作成しました。`);
+            logEntries.push('以前のセーブデータをクリアしました。');
             game.genWorld();
         }
 
-        // 難易度をセーブデータに合わせる（ロードした場合）
-        if (game.settings.difficulty !== difficulty) {
-             console.log(`Loaded game with difficulty: ${game.settings.difficulty}. Overriding selection.`);
-        }
+        logEntries.push(`World started in ${game.settings.difficulty} mode.`);
+        logEntries.forEach(msg => game.log(msg));
 
-        game.log(`World started in ${game.settings.difficulty} mode.`);
         game.updateObjectivePanel();
+        if (panelNotes.length) {
+            const panel = document.getElementById('objective-panel');
+            panel.innerText = `${panel.innerText}\n${panelNotes.join('\n')}`;
+            panel.style.display = 'block';
+        }
         game.uiUpd();
         game.loop();
 
@@ -2161,8 +2224,25 @@ window.onload = () => {
     difficultyButtons.forEach(button => {
         button.addEventListener('click', () => {
             const difficulty = button.dataset.difficulty;
-            startGame(difficulty);
+            pendingDifficulty = difficulty;
+            if (localStorage.getItem('miniTerrariaSave')) {
+                savePrompt.style.display = 'flex';
+                savePromptMessage.textContent = `セーブデータが見つかりました。難易度「${difficulty}」を選択しました。`;
+                savePromptDiff.textContent = '';
+                return;
+            }
+            startGame(difficulty, false);
         });
+    });
+
+    startFreshBtn.addEventListener('click', () => {
+        if (!pendingDifficulty) return;
+        startGame(pendingDifficulty, false);
+    });
+
+    continueBtn.addEventListener('click', () => {
+        if (!pendingDifficulty) return;
+        startGame(pendingDifficulty, true);
     });
 };
 
