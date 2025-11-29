@@ -1764,7 +1764,14 @@ class Game {
         let speed = this.getModifiedStat('speed', baseSpeed);
         if(this.keys['KeyA']) { p.vx=-speed; p.dir=-1; p.frame+=0.2; } else if(this.keys['KeyD']) { p.vx=speed; p.dir=1; p.frame+=0.2; } else { p.vx*=0.8; p.frame=0; }
         
-        let tileAt = this.world[Math.floor((p.y+p.h/2)/TILE_SIZE)][Math.floor((p.x+p.w/2)/TILE_SIZE)];
+        const getPlayerTile = () => {
+            const tx = Math.floor((p.x + p.w / 2) / TILE_SIZE);
+            const ty = Math.floor((p.y + p.h / 2) / TILE_SIZE);
+            if (tx < 0 || tx >= CHUNK_WIDTH || ty < 0 || ty >= CHUNK_HEIGHT) return IDS.AIR;
+            return this.world[ty][tx];
+        };
+
+        let tileAt = getPlayerTile();
         let inWater = tileAt === IDS.WATER;
         if(inWater) { p.vx *= 0.8; p.vy += 0.1; if(p.vy>2) p.vy=2; if(this.keys['Space']) p.vy = -3; } else { p.vy+=GRAVITY; if(p.vy>TERMINAL_VELOCITY) p.vy=TERMINAL_VELOCITY; }
 
@@ -2209,6 +2216,14 @@ function runTests() {
             }
         },
 
+        assertDoesNotThrow(fn, message) {
+            try {
+                fn();
+            } catch (e) {
+                throw new Error(message ? `${message}: ${e.message}` : `Unexpected throw: ${e.message}`);
+            }
+        },
+
         summary() {
             console.log(`\nTest Summary: ${this.passed} / ${this.total} passed.`);
             const resultsDiv = document.createElement('div');
@@ -2251,6 +2266,24 @@ function runTests() {
 
         const correctedX = wallX * TILE_SIZE - player.w - 0.1;
         TestSuite.assert(Math.abs(player.x - correctedX) < 0.1, `Player penetrated wall. Expected X: ~${correctedX.toFixed(2)}, Got: ${player.x.toFixed(2)}`);
+    });
+
+    TestSuite.test("Update: safe when player goes out of bounds", () => {
+        const game = createTestGame();
+        const positions = [
+            { x: -TILE_SIZE, y: game.player.y, label: 'left of' },
+            { x: CHUNK_WIDTH * TILE_SIZE + TILE_SIZE, y: game.player.y, label: 'right of' },
+            { x: game.player.x, y: -TILE_SIZE, label: 'above' },
+            { x: game.player.x, y: CHUNK_HEIGHT * TILE_SIZE + TILE_SIZE, label: 'below' }
+        ];
+
+        positions.forEach(pos => {
+            game.player.x = pos.x;
+            game.player.y = pos.y;
+            game.player.vx = 0;
+            game.player.vy = 0;
+            TestSuite.assertDoesNotThrow(() => game.update(), `Update crashed when player was ${pos.label} world bounds`);
+        });
     });
 
     TestSuite.test("Inventory: addItem to empty slot", () => {
