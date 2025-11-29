@@ -1254,26 +1254,49 @@ class Game {
 
     loadGame() {
         const raw = localStorage.getItem('miniTerrariaSave'); if(!raw) return false;
+
+        const isValidGrid = (grid) => Array.isArray(grid)
+            && grid.length === CHUNK_HEIGHT
+            && grid.every(row => Array.isArray(row) && row.length === CHUNK_WIDTH && row.every(cell => typeof cell === 'number'));
+
+        const clearCorruptSave = (message) => {
+            localStorage.removeItem('miniTerrariaSave');
+            this.log(message || 'セーブデータが破損しているため、新しい世界を生成します。');
+        };
+
+        let d;
         try {
-            const d = JSON.parse(raw);
-            this.settings = d.settings || this.settings;
-            this.world = d.world; this.walls = d.walls; this.player = d.player || this.player; this.time = (typeof d.time === 'number') ? d.time : this.time;
-            this.currentObjectiveIndex = Number.isInteger(d.currentObjectiveIndex) ? d.currentObjectiveIndex : this.currentObjectiveIndex;
-            this.flags = d.flags || this.flags || {};
+            d = JSON.parse(raw);
+        } catch (e) {
+            console.error(e);
+            clearCorruptSave('セーブデータの読み込みに失敗しました。新しい世界を生成します。');
+            return false;
+        }
 
-            // Ensure inv size compatibility
-            if (!Array.isArray(this.player.inv)) this.player.inv = [];
-            while(this.player.inv.length < INV_SIZE) this.player.inv.push({id:IDS.AIR, n:0});
-            const savedStatusEffects = (d.player && d.player.statusEffects) || d.playerStatusEffects;
-            if (!Array.isArray(savedStatusEffects)) {
-                if (!Array.isArray(this.player.statusEffects)) this.player.statusEffects = [];
-            } else {
-                this.player.statusEffects = savedStatusEffects;
-            }
+        const hasPlayerInventory = d.player && typeof d.player === 'object' && Array.isArray(d.player.inv);
 
-            this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type, this); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
-            this.calcLight(); this.updateObjectivePanel(); this.uiUpd(); return true;
-        } catch(e) { console.error(e); return false; }
+        if (!isValidGrid(d.world) || !isValidGrid(d.walls) || !hasPlayerInventory) {
+            clearCorruptSave('セーブデータの形式が正しくないため、新しい世界を生成します。');
+            return false;
+        }
+
+        this.settings = d.settings || this.settings;
+        this.world = d.world; this.walls = d.walls; this.player = d.player || this.player; this.time = (typeof d.time === 'number') ? d.time : this.time;
+        this.currentObjectiveIndex = Number.isInteger(d.currentObjectiveIndex) ? d.currentObjectiveIndex : this.currentObjectiveIndex;
+        this.flags = d.flags || this.flags || {};
+
+        // Ensure inv size compatibility
+        if (!Array.isArray(this.player.inv)) this.player.inv = [];
+        while(this.player.inv.length < INV_SIZE) this.player.inv.push({id:IDS.AIR, n:0});
+        const savedStatusEffects = (d.player && d.player.statusEffects) || d.playerStatusEffects;
+        if (!Array.isArray(savedStatusEffects)) {
+            if (!Array.isArray(this.player.statusEffects)) this.player.statusEffects = [];
+        } else {
+            this.player.statusEffects = savedStatusEffects;
+        }
+
+        this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type, this); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
+        this.calcLight(); this.updateObjectivePanel(); this.uiUpd(); return true;
     }
 
     triggerHardmode() {
@@ -2551,6 +2574,30 @@ function runTests() {
                 OBJECTIVES[loadTarget.currentObjectiveIndex].text,
                 "Objective panel should be refreshed after load."
             );
+        } finally {
+            localStorage.removeItem('miniTerrariaSave');
+        }
+    });
+
+    TestSuite.test("LoadGame: rejects malformed save data", () => {
+        const game = createTestGame();
+        const originalWorld = game.world;
+
+        const malformed = {
+            settings: game.settings,
+            world: [[IDS.AIR]], // Wrong dimensions
+            walls: [[IDS.AIR]],
+            player: { inv: [] },
+            time: game.time
+        };
+
+        localStorage.setItem('miniTerrariaSave', JSON.stringify(malformed));
+
+        try {
+            const loaded = game.loadGame();
+            TestSuite.assert(!loaded, "Load should fail for malformed world data.");
+            TestSuite.assertEquals(localStorage.getItem('miniTerrariaSave'), null, "Corrupt save should be cleared.");
+            TestSuite.assertEquals(game.world, originalWorld, "World should remain untouched when load fails.");
         } finally {
             localStorage.removeItem('miniTerrariaSave');
         }
