@@ -417,6 +417,18 @@ const TILESET_SOURCES = [
     'assets/images/blocks2.jpg'
 ];
 
+const createPlaceholderTileset = (color = '#ff00ff') => {
+    const canvas = document.createElement('canvas');
+    canvas.width = TILE_SIZE;
+    canvas.height = TILE_SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+    return { img: canvas, src: 'placeholder', ready: true, placeholder: true };
+};
+
+let placeholderTileset = null;
+
 const tilesets = TILESET_SOURCES.map(src => {
     const img = new Image();
     const entry = { img, src, ready: false };
@@ -430,7 +442,10 @@ let activeTilesetIndex = 0;
 const getActiveTileset = () => {
     const chosen = tilesets[activeTilesetIndex];
     if (chosen.ready) return chosen;
-    return tilesets.find(t => t.ready) || chosen;
+    const readyTileset = tilesets.find(t => t.ready);
+    if (readyTileset) return readyTileset;
+    if (!placeholderTileset) placeholderTileset = createPlaceholderTileset();
+    return placeholderTileset;
 };
 const cycleTileset = (dir = 1) => {
     const len = tilesets.length;
@@ -1072,6 +1087,7 @@ class Game {
 
         this.time = 6000; this.dayLen = 24000; this.updLight = true; this.wTimer = 0;
         this.hitStop = 0;
+        this.tilesetFallbackNotified = false;
 
         // Objective System
         this.currentObjectiveIndex = 0;
@@ -2063,9 +2079,18 @@ class Game {
 
         this.ctx.save(); this.ctx.translate(-Math.floor(this.cam.x), -Math.floor(this.cam.y));
 
+        const activeTileset = getActiveTileset();
+        const tilesetUnavailable = !activeTileset || !activeTileset.ready || activeTileset.placeholder;
+        const placeholderColor = '#ff00ff';
+        if (tilesetUnavailable && !this.tilesetFallbackNotified) {
+            const warning = 'アセットが読み込めませんでした。プレースホルダーで描画します。';
+            console.warn(warning);
+            this.log(warning);
+            this.tilesetFallbackNotified = true;
+        }
+
         const drawSpriteIfReady = (props, dx, dy) => {
-            const activeTileset = getActiveTileset();
-            if(activeTileset.ready && props && props.sprite) {
+            if(activeTileset && activeTileset.ready && props && props.sprite) {
                 this.ctx.drawImage(activeTileset.img, props.sprite.x*TILE_SIZE, props.sprite.y*TILE_SIZE, TILE_SIZE, TILE_SIZE, dx, dy, TILE_SIZE, TILE_SIZE);
                 return true;
             }
@@ -2078,13 +2103,18 @@ class Game {
             if(w!==IDS.AIR && (t===IDS.AIR || PROPS[t].transparent)) {
                 const wp=PROPS[w];
                 const wallUsedSprite = drawSpriteIfReady(wp, px, py);
-                if(!wallUsedSprite) { this.ctx.fillStyle=wp.color; this.ctx.fillRect(px,py,32,32); }
+                if(!wallUsedSprite) { this.ctx.fillStyle=tilesetUnavailable ? placeholderColor : wp.color; this.ctx.fillRect(px,py,32,32); }
                 this.ctx.fillStyle='rgba(0,0,0,0.3)'; this.ctx.fillRect(px,py,32,32);
             }
             if(t!==IDS.AIR) {
                 let p=PROPS[t];
                 const usedSprite = drawSpriteIfReady(p, px, py);
                 if(!usedSprite) {
+                    if (tilesetUnavailable) {
+                        this.ctx.fillStyle = placeholderColor;
+                        this.ctx.fillRect(px, py, 32, 32);
+                        continue;
+                    }
                     this.ctx.fillStyle=p.color;
                     if(p.decor) {
                         if(p.decor==='torch') { this.ctx.fillStyle='brown'; this.ctx.fillRect(px+14,py+10,4,10); this.ctx.fillStyle='orange'; this.ctx.fillRect(px+12,py+6,8,8); }
