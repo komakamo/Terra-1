@@ -910,6 +910,125 @@ class Entity {
 }
 
 class Game {
+    static activeGame = null;
+    static listenerManager = { registered: false, listeners: [] };
+
+    static getActiveGame() { return Game.activeGame; }
+
+    static removeGlobalListeners() {
+        const manager = Game.listenerManager;
+        if (!manager.registered) return;
+        for (const { target, event, handler, options } of manager.listeners) {
+            target.removeEventListener(event, handler, options);
+        }
+        manager.listeners = [];
+        manager.registered = false;
+    }
+
+    static registerGlobalListeners() {
+        const manager = Game.listenerManager;
+        if (manager.registered) Game.removeGlobalListeners();
+
+        const getGame = () => Game.getActiveGame();
+        const listeners = [];
+        const add = (target, event, handler, options) => {
+            if (!target || typeof target.addEventListener !== 'function') return;
+            target.addEventListener(event, handler, options);
+            listeners.push({ target, event, handler, options });
+        };
+
+        const handleResize = () => {
+            const game = getGame();
+            if (game) game.resize();
+        };
+
+        const handleKeyDown = (e) => {
+            const game = getGame();
+            if (!game) return;
+            game.keys[e.code] = true;
+            if(e.key>='1'&&e.key<='9') { game.player.sel=parseInt(e.key)-1; game.uiUpd(); }
+            if(e.code==='KeyE') {
+                if(game.ui.inv) game.toggleInv();
+                else game.interact();
+            }
+            if(e.code==='KeyH') game.checkHousing();
+            if(e.code==='KeyT') {
+                const ts = cycleTileset();
+                const label = ts?.src?.split('/').pop() || 'Tileset';
+                game.log(`Tileset switched to ${label}${ts.ready ? '' : ' (loading...)'}`);
+            }
+            if(e.code==='Space') game.jump();
+            if(e.code==='F5') game.saveGame();
+            if(e.code==='F9') { if(game.loadGame()) game.log("Game Loaded!"); }
+            if(e.code==='KeyI') game.toggleInv();
+            if(e.code==='Escape') { game.ui.inv=false; game.ui.craft=false; document.getElementById('inventory-screen').style.display='none'; document.getElementById('crafting-menu').style.display='none'; }
+        };
+
+        const handleKeyUp = (e) => {
+            const game = getGame();
+            if (!game) return;
+            game.keys[e.code]=false;
+            if(e.code==='Space' && game.player.vy < -2) game.player.vy *= 0.5;
+        };
+
+        const handleMouseMove = (e) => {
+            const game = getGame();
+            if (!game) return;
+            game.mouse.x=e.clientX; game.mouse.y=e.clientY;
+            game.updateTooltip(e);
+        };
+
+        const handleMouseDown = (e) => {
+            const game = getGame();
+            if (!game || game.ui.inv) return;
+            if(e.button===0){game.mouse.l=true;game.clickL();} if(e.button===2){game.mouse.r=true;game.clickR();}
+        };
+
+        const handleMouseUp = (e) => {
+            const game = getGame();
+            if (!game) return;
+            if(e.button===0){game.mouse.l=false;game.mining.on=false;} if(e.button===2)game.mouse.r=false;
+        };
+
+        const handleContextMenu = (e) => {
+            e.preventDefault();
+        };
+
+        const canvas = getGame()?.c || document.getElementById('gameCanvas');
+        add(window, 'resize', handleResize);
+        add(window, 'keydown', handleKeyDown);
+        add(window, 'keyup', handleKeyUp);
+        add(window, 'mousemove', handleMouseMove);
+        add(canvas, 'mousedown', handleMouseDown);
+        add(canvas, 'mouseup', handleMouseUp);
+        add(canvas, 'contextmenu', handleContextMenu);
+
+        const muteBtn = document.getElementById('mute-btn');
+        add(muteBtn, 'click', () => {
+            const game = getGame();
+            if (game) game.setMuteState(!game.audioMuted);
+        });
+
+        document.querySelectorAll('.craft-tab').forEach(tab => {
+            add(tab, 'click', () => {
+                const game = getGame();
+                if (!game) return;
+                game.ui.craftTab = tab.dataset.tab;
+                document.querySelectorAll('.craft-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                game.rendRec();
+            });
+        });
+
+        manager.listeners = listeners;
+        manager.registered = true;
+    }
+
+    static setActiveGame(game) {
+        Game.activeGame = game;
+        Game.registerGlobalListeners();
+    }
+
     constructor() {
         this.c = document.getElementById('gameCanvas'); this.ctx = this.c.getContext('2d');
         this.miniC = document.getElementById('minimapCanvas'); this.miniCtx = this.miniC.getContext('2d');
@@ -917,7 +1036,7 @@ class Game {
         this.world = []; this.walls = []; this.light = []; this.parts = []; this.texts = []; this.enemies = []; this.projs = [];
         this.loopHandle = null;
         this.halted = false;
-        
+
         // Sound
         this.sound = new SoundManager();
 
@@ -925,7 +1044,6 @@ class Game {
         this.bgm = document.getElementById('bgm-day');
         this.bgm.volume = 0.5;
         this.audioMuted = localStorage.getItem('miniTerrariaMuted') === 'true';
-        this.setMuteState(this.audioMuted);
 
 
         // Expanded Inventory
@@ -945,10 +1063,10 @@ class Game {
             level: 1, xp: 0, nextLevelXp: 100,
             statusEffects: [] // {type, duration, power}
         };
-        
+
         this.settings = { difficulty: 'normal' };
         this.cam = {x:0, y:0}; this.keys = {}; this.mouse = {x:0, y:0, l:false, r:false};
-        this.mining = {on:false, x:-1, y:-1, t:0, dur:0}; 
+        this.mining = {on:false, x:-1, y:-1, t:0, dur:0};
         this.ui = { craft:false, inv:false, craftTab: 'craftable' };
         this.invCursor = null; // Slot index selected for swapping
 
@@ -959,13 +1077,15 @@ class Game {
         this.currentObjectiveIndex = 0;
         this.flags = {}; // For story flags like boss kills
 
-        this.init();
+        Game.setActiveGame(this);
+        this.setMuteState(this.audioMuted);
+
         // World gen is now handled by the start screen button handler
         // if(!this.loadGame()) { this.genWorld(); } else { this.log("Game Loaded!"); }
-        
+
         // Init minimap size
         this.miniC.width = CHUNK_WIDTH; this.miniC.height = CHUNK_HEIGHT;
-        
+
         this.updateObjectivePanel(); // Initial objective display
         this.uiUpd();
     }
@@ -1052,62 +1172,9 @@ class Game {
     }
     
     resize() { this.w=window.innerWidth; this.h=window.innerHeight; this.c.width=this.w; this.c.height=this.h; this.ctx.imageSmoothingEnabled=false; }
-    
+
     init() {
-        window.onresize=()=>this.resize();
-        window.onkeydown=e=>{ 
-            this.keys[e.code]=true; 
-            if(e.key>='1'&&e.key<='9') { this.player.sel=parseInt(e.key)-1; this.uiUpd(); } 
-            if(e.code==='KeyE') {
-                if(this.ui.inv) this.toggleInv(); // Close inv if open
-                else this.interact();
-            }
-            if(e.code==='KeyH') this.checkHousing();
-            if(e.code==='KeyT') {
-                const ts = cycleTileset();
-                const label = ts?.src?.split('/').pop() || 'Tileset';
-                this.log(`Tileset switched to ${label}${ts.ready ? '' : ' (loading...)'}`);
-            }
-            if(e.code==='Space') this.jump();
-            if(e.code==='F5') this.saveGame();
-            if(e.code==='F9') { if(this.loadGame()) this.log("Game Loaded!"); }
-            if(e.code==='KeyI') this.toggleInv();
-            if(e.code==='Escape') { this.ui.inv=false; this.ui.craft=false; document.getElementById('inventory-screen').style.display='none'; document.getElementById('crafting-menu').style.display='none'; }
-        };
-        window.onkeyup=e=> {
-            this.keys[e.code]=false;
-            if(e.code==='Space' && this.player.vy < -2) this.player.vy *= 0.5;
-        };
-
-        // BGM Mute Button
-        const muteBtn = document.getElementById('mute-btn');
-        this.setMuteState(this.audioMuted);
-        muteBtn.addEventListener('click', () => {
-            this.setMuteState(!this.audioMuted);
-        });
-
-        // Crafting Tab Handler
-        document.querySelectorAll('.craft-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                this.ui.craftTab = tab.dataset.tab;
-                document.querySelectorAll('.craft-tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                this.rendRec();
-            });
-        });
-        
-        // Tooltip Handler
-        window.addEventListener('mousemove', (e) => {
-            this.mouse.x=e.clientX; this.mouse.y=e.clientY;
-            this.updateTooltip(e);
-        });
-
-        this.c.onmousedown=e=>{ 
-            if(this.ui.inv) return; // Block game interaction when inv open
-            if(e.button===0){this.mouse.l=true;this.clickL();} if(e.button===2){this.mouse.r=true;this.clickR();} 
-        };
-        this.c.onmouseup=e=>{ if(e.button===0){this.mouse.l=false;this.mining.on=false;} if(e.button===2)this.mouse.r=false; };
-        this.c.oncontextmenu=e=>e.preventDefault();
+        // Event listeners are managed globally to avoid duplicate registration.
     }
     
     log(txt) {
@@ -2452,6 +2519,23 @@ function runTests() {
             }
         }
     };
+
+    TestSuite.test("Input handlers track the active game", () => {
+        const firstGame = createTestGame();
+        let firstJumpCalls = 0;
+        firstGame.jump = () => { firstJumpCalls++; };
+
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+        TestSuite.assertEquals(firstJumpCalls, 1, "Active game should receive a single keydown event.");
+
+        const secondGame = createTestGame();
+        let secondJumpCalls = 0;
+        secondGame.jump = () => { secondJumpCalls++; };
+
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+        TestSuite.assertEquals(firstJumpCalls, 1, "Inactive games should not handle new input after switching active game.");
+        TestSuite.assertEquals(secondJumpCalls, 1, "New active game should receive input only once.");
+    });
 
     TestSuite.test("Horizontal Collision", () => {
         const collideFn = Game.prototype.collide;
