@@ -1238,7 +1238,17 @@ class Game {
     }
 
     saveGame() {
-        const data = { settings: this.settings, world: this.world, walls: this.walls, player: this.player, time: this.time, enemies: this.enemies.map(e => ({ x:e.x, y:e.y, type:e.type, hp:e.hp, dead:e.dead, phase:e.phase })) };
+        const data = {
+            settings: this.settings,
+            world: this.world,
+            walls: this.walls,
+            player: this.player,
+            time: this.time,
+            enemies: this.enemies.map(e => ({ x:e.x, y:e.y, type:e.type, hp:e.hp, dead:e.dead, phase:e.phase })),
+            currentObjectiveIndex: this.currentObjectiveIndex,
+            flags: this.flags,
+            playerStatusEffects: this.player.statusEffects
+        };
         try { localStorage.setItem('miniTerrariaSave', JSON.stringify(data)); this.log("Game Saved!"); } catch(e) { this.log("Save failed"); }
     }
 
@@ -1246,14 +1256,23 @@ class Game {
         const raw = localStorage.getItem('miniTerrariaSave'); if(!raw) return false;
         try {
             const d = JSON.parse(raw);
-            this.settings = d.settings || { difficulty: 'normal' };
-            this.world = d.world; this.walls = d.walls; this.player = d.player; this.time = d.time || 6000;
+            this.settings = d.settings || this.settings;
+            this.world = d.world; this.walls = d.walls; this.player = d.player || this.player; this.time = (typeof d.time === 'number') ? d.time : this.time;
+            this.currentObjectiveIndex = Number.isInteger(d.currentObjectiveIndex) ? d.currentObjectiveIndex : this.currentObjectiveIndex;
+            this.flags = d.flags || this.flags || {};
+
             // Ensure inv size compatibility
+            if (!Array.isArray(this.player.inv)) this.player.inv = [];
             while(this.player.inv.length < INV_SIZE) this.player.inv.push({id:IDS.AIR, n:0});
-            if (!this.player.statusEffects) this.player.statusEffects = []; // Compatibility for old saves
-            
+            const savedStatusEffects = (d.player && d.player.statusEffects) || d.playerStatusEffects;
+            if (!Array.isArray(savedStatusEffects)) {
+                if (!Array.isArray(this.player.statusEffects)) this.player.statusEffects = [];
+            } else {
+                this.player.statusEffects = savedStatusEffects;
+            }
+
             this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type, this); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
-            this.calcLight(); this.uiUpd(); return true;
+            this.calcLight(); this.updateObjectivePanel(); this.uiUpd(); return true;
         } catch(e) { console.error(e); return false; }
     }
 
@@ -2492,6 +2511,49 @@ function runTests() {
             html.includes(`Restores ${mushroom.val} HP`),
             `Tooltip for healing item should include heal amount. Got: ${html}`
         );
+    });
+
+    TestSuite.test("LoadGame: falls back when new fields are missing", () => {
+        const sourceGame = createTestGame();
+        const legacyPlayer = JSON.parse(JSON.stringify(sourceGame.player));
+        delete legacyPlayer.statusEffects;
+        const legacyData = {
+            settings: sourceGame.settings,
+            world: sourceGame.world,
+            walls: sourceGame.walls,
+            player: legacyPlayer,
+            time: sourceGame.time,
+            enemies: []
+        };
+
+        localStorage.setItem('miniTerrariaSave', JSON.stringify(legacyData));
+
+        const loadTarget = createTestGame();
+        loadTarget.currentObjectiveIndex = 0;
+        loadTarget.flags = {};
+        loadTarget.player.statusEffects = [];
+
+        const panel = document.getElementById('objective-panel');
+        panel.innerText = 'stale';
+
+        const loaded = loadTarget.loadGame();
+
+        try {
+            TestSuite.assert(loaded, "Load should succeed for legacy data without new fields.");
+            TestSuite.assertEquals(loadTarget.currentObjectiveIndex, 0, "Missing objective index should fallback to default.");
+            TestSuite.assertDeepEquals(loadTarget.flags, {}, "Missing flags should fallback to default.");
+            TestSuite.assert(
+                Array.isArray(loadTarget.player.statusEffects) && loadTarget.player.statusEffects.length === 0,
+                "Missing status effects should fallback to empty array."
+            );
+            TestSuite.assertEquals(
+                panel.innerText,
+                OBJECTIVES[loadTarget.currentObjectiveIndex].text,
+                "Objective panel should be refreshed after load."
+            );
+        } finally {
+            localStorage.removeItem('miniTerrariaSave');
+        }
     });
 
     return TestSuite.run();
