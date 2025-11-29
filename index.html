@@ -1751,8 +1751,11 @@ class Game {
         if(this.enemies.length< (isNight?8:4) && Math.random()<0.01) {
             let ex=Math.floor(this.player.x/32) + (Math.random()>0.5?25:-25);
             if(ex>0&&ex<CHUNK_WIDTH) {
-                let type='slime', tile = this.world[Math.floor(this.player.y/32)][ex];
-                if(tile===IDS.EBONSTONE || this.world[Math.floor(this.player.y/32)+5][ex]===IDS.EBONSTONE) type='eater'; else if(isNight) type=Math.random()>0.5?'zombie':'eye';
+                const clampTileY = ty => Math.min(Math.max(ty, 0), CHUNK_HEIGHT - 1);
+                const playerTileY = clampTileY(Math.floor(this.player.y/32));
+                const lowerTileY = clampTileY(Math.floor(this.player.y/32) + 5);
+                let type='slime', tile = this.world[playerTileY][ex];
+                if(tile===IDS.EBONSTONE || this.world[lowerTileY][ex]===IDS.EBONSTONE) type='eater'; else if(isNight) type=Math.random()>0.5?'zombie':'eye';
                 let ey=0; while(ey<CHUNK_HEIGHT && !PROPS[this.world[ey][ex]].solid) ey++;
                 if(type==='eye'||type==='eater') ey = Math.floor(this.player.y/32)-10;
                 if(ey<CHUNK_HEIGHT) this.enemies.push(new Entity(ex*32, (ey-2)*32, type, this));
@@ -2270,20 +2273,30 @@ function runTests() {
 
     TestSuite.test("Update: safe when player goes out of bounds", () => {
         const game = createTestGame();
+        const originalRandom = Math.random;
         const positions = [
-            { x: -TILE_SIZE, y: game.player.y, label: 'left of' },
-            { x: CHUNK_WIDTH * TILE_SIZE + TILE_SIZE, y: game.player.y, label: 'right of' },
-            { x: game.player.x, y: -TILE_SIZE, label: 'above' },
-            { x: game.player.x, y: CHUNK_HEIGHT * TILE_SIZE + TILE_SIZE, label: 'below' }
+            { x: -TILE_SIZE, y: game.player.y, label: 'left of', forceSpawn: false },
+            { x: CHUNK_WIDTH * TILE_SIZE + TILE_SIZE, y: game.player.y, label: 'right of', forceSpawn: false },
+            { x: game.player.x, y: -TILE_SIZE, label: 'above', forceSpawn: true },
+            { x: game.player.x, y: CHUNK_HEIGHT * TILE_SIZE + TILE_SIZE, label: 'below', forceSpawn: true }
         ];
 
-        positions.forEach(pos => {
-            game.player.x = pos.x;
-            game.player.y = pos.y;
-            game.player.vx = 0;
-            game.player.vy = 0;
-            TestSuite.assertDoesNotThrow(() => game.update(), `Update crashed when player was ${pos.label} world bounds`);
-        });
+        try {
+            positions.forEach(pos => {
+                const sequence = pos.forceSpawn ? [0, 1, 1] : [1];
+                let call = 0;
+                Math.random = () => sequence[call++] ?? sequence[sequence.length - 1];
+
+                game.player.x = pos.x;
+                game.player.y = pos.y;
+                game.player.vx = 0;
+                game.player.vy = 0;
+
+                TestSuite.assertDoesNotThrow(() => game.update(), `Update crashed when player was ${pos.label} world bounds`);
+            });
+        } finally {
+            Math.random = originalRandom;
+        }
     });
 
     TestSuite.test("Inventory: addItem to empty slot", () => {
