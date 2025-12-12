@@ -622,22 +622,23 @@ const RECIPES = [
     { out:{id:IDS.EYE_SUMMON, n:1}, in:[{id:IDS.LENS, n:6}], station:IDS.WORKBENCH },
 ];
 
+const OBJECTIVE_TILE_IDS = [IDS.WORKBENCH, IDS.FURNACE];
+
 const OBJECTIVES = [
     {
         text: "木材を10個集めて、ワークベンチを作ろう。",
         condition: (game) => {
             const hasItem = game.player.inv.some(i => i.id === IDS.WORKBENCH);
-            // This check is slow, but acceptable for this case.
-            const isPlaced = game.world.some(row => row.includes(IDS.WORKBENCH));
-            return hasItem || isPlaced;
+            const placedCount = game.objectiveTileCounts[IDS.WORKBENCH] || 0;
+            return hasItem || placedCount > 0;
         }
     },
     {
         text: "ワークベンチの近くでかまどを作ろう。\n(石x20, 木材x5, 松明x3)",
         condition: (game) => {
             const hasItem = game.player.inv.some(i => i.id === IDS.FURNACE);
-            const isPlaced = game.world.some(row => row.includes(IDS.FURNACE));
-            return hasItem || isPlaced;
+            const placedCount = game.objectiveTileCounts[IDS.FURNACE] || 0;
+            return hasItem || placedCount > 0;
         }
     },
     {
@@ -891,6 +892,7 @@ class Entity {
             for(let i=0;i<6;i++) parts.push(new Particle(this.x+this.w/2, this.y+this.h/2, this.color, 5));
             if(this.type==='boss') {
                 game.flags.boss1Defeated = true; // Set flag for objective
+                game.requestObjectiveCheck();
                 texts.push(new TextEffect(this.x, this.y-30, "The spirits of darkness and light have been released.", '#a000e5'));
                 game.triggerHardmode();
             }
@@ -1092,6 +1094,10 @@ class Game {
         // Objective System
         this.currentObjectiveIndex = 0;
         this.flags = {}; // For story flags like boss kills
+        this.objectiveTileCounts = {};
+        this.pendingObjectiveCheck = true;
+        this.objectiveCheckInterval = 1000;
+        this.lastObjectiveCheck = -Infinity;
 
         Game.setActiveGame(this);
         this.setMuteState(this.audioMuted);
@@ -1115,6 +1121,39 @@ class Game {
             panel.style.display = 'none';
         }
     }
+
+    refreshObjectiveTileCounts() {
+        this.objectiveTileCounts = {};
+        OBJECTIVE_TILE_IDS.forEach(id => this.objectiveTileCounts[id] = 0);
+        if (!this.world) return;
+
+        for (let y = 0; y < this.world.length; y++) {
+            const row = this.world[y];
+            for (let x = 0; x < row.length; x++) {
+                const id = row[x];
+                if (OBJECTIVE_TILE_IDS.includes(id)) {
+                    this.objectiveTileCounts[id] = (this.objectiveTileCounts[id] || 0) + 1;
+                }
+            }
+        }
+    }
+
+    handleTileChange(previousId, nextId) {
+        if (previousId === nextId) return;
+
+        OBJECTIVE_TILE_IDS.forEach(id => {
+            if (previousId === id) {
+                this.objectiveTileCounts[id] = Math.max(0, (this.objectiveTileCounts[id] || 0) - 1);
+            }
+            if (nextId === id) {
+                this.objectiveTileCounts[id] = (this.objectiveTileCounts[id] || 0) + 1;
+            }
+        });
+
+        this.requestObjectiveCheck();
+    }
+
+    requestObjectiveCheck() { this.pendingObjectiveCheck = true; }
 
     generateTreasureVault() {
         const minX = Math.floor(CHUNK_WIDTH * 0.2);
@@ -1165,6 +1204,7 @@ class Game {
             this.currentObjectiveIndex++;
             this.log("目的達成！");
             this.updateObjectivePanel();
+            this.requestObjectiveCheck();
         }
     }
 
@@ -1415,6 +1455,8 @@ class Game {
         }
 
         this.enemies = []; if(d.enemies) d.enemies.forEach(e => { if(!e.dead) { const ent = new Entity(e.x, e.y, e.type, this); ent.hp = e.hp; ent.phase = e.phase; this.enemies.push(ent); } });
+        this.refreshObjectiveTileCounts();
+        this.requestObjectiveCheck();
         this.calcLight(); this.updateObjectivePanel(); this.uiUpd(); return true;
     }
 
@@ -1512,6 +1554,8 @@ class Game {
         this.generateAbandonedHouse(hMap);
         this.generateTreasureVault();
 
+        this.refreshObjectiveTileCounts();
+        this.requestObjectiveCheck();
         this.calcLight();
     }
 
@@ -1696,7 +1740,8 @@ class Game {
                             if(t===IDS.HEART_CRYSTAL) drop=IDS.HEART_ITEM;
                             if(t===IDS.MUSHROOM || t===IDS.GLOWING_MUSHROOM) drop = (t===IDS.MUSHROOM) ? IDS.MUSHROOM_ITEM : IDS.GLOWING_MUSHROOM_ITEM;
                             if(t===IDS.SAND) drop=IDS.SAND_ITEM; if(t===IDS.CACTUS) drop=IDS.CACTUS_ITEM;
-                            this.addItem(drop,1); this.world[gy][gx]=IDS.AIR; 
+                            this.addItem(drop,1); const previousTile = t; this.world[gy][gx]=IDS.AIR;
+                            this.handleTileChange(previousTile, IDS.AIR);
                             for(let i=0;i<8;i++) this.parts.push(new Particle(gx*32+16, gy*32+16, PROPS[t].color, 5));
                             this.updLight=true; this.mining.on=false;
                             this.sound.play('dig');
@@ -1751,8 +1796,8 @@ class Game {
             }
             return;
         }
-        if(t===IDS.DOOR_CLOSED) { this.world[gy][gx]=IDS.DOOR_OPEN; this.sound.play('dig'); return; }
-        if(t===IDS.DOOR_OPEN) { this.world[gy][gx]=IDS.DOOR_CLOSED; this.sound.play('dig'); return; }
+        if(t===IDS.DOOR_CLOSED) { this.world[gy][gx]=IDS.DOOR_OPEN; this.sound.play('dig'); this.requestObjectiveCheck(); return; }
+        if(t===IDS.DOOR_OPEN) { this.world[gy][gx]=IDS.DOOR_CLOSED; this.sound.play('dig'); this.requestObjectiveCheck(); return; }
 
         let it=this.player.inv[this.player.sel], ip=PROPS[it.id];
         if(!ip || it.n<=0) return;
@@ -1766,11 +1811,13 @@ class Game {
             if(old) this.addItem(old, 1); this.calcDef(); return;
         }
         let pid = ip.placeId || it.id;
-        if(ip.isWall) { if(this.world[gy][gx]===IDS.AIR && this.walls[gy][gx]!==pid) { this.walls[gy][gx]=pid; this.consItem(); this.updLight=true; this.sound.play('dig'); } }
+        if(ip.isWall) { if(this.world[gy][gx]===IDS.AIR && this.walls[gy][gx]!==pid) { this.walls[gy][gx]=pid; this.consItem(); this.updLight=true; this.sound.play('dig'); this.requestObjectiveCheck(); } }
         else if(ip.solid || ip.decor) {
             if(this.world[gy][gx]===IDS.AIR || this.world[gy][gx]===IDS.WATER) {
                 if(ip.solid && !ip.platform && this.rectCol(gx*32,gy*32,32,32, this.player.x,this.player.y,this.player.w,this.player.h)) return;
+                const previousTile = this.world[gy][gx];
                 this.world[gy][gx]=pid; this.consItem(); this.updLight=true; this.sound.play('dig');
+                this.handleTileChange(previousTile, pid);
             }
         }
     }
@@ -1788,6 +1835,7 @@ class Game {
              s.n--;
              if(s.n <= 0) { s.id = IDS.AIR; s.n = 0; }
              this.uiUpd();
+             this.requestObjectiveCheck();
         }
     }
     addItem(id, n) {
@@ -1812,6 +1860,7 @@ class Game {
             if(s) { s.n+=n; if(s.n<=0) {s.id=IDS.AIR; s.n=0;} }
         }
         this.uiUpd();
+        this.requestObjectiveCheck();
     }
     toggleCraft() { this.ui.craft=!this.ui.craft; document.getElementById('crafting-menu').style.display=this.ui.craft?'block':'none'; if(this.ui.craft) this.rendRec(); }
     _canCraft(recipe, nearbyStations) {
@@ -2007,7 +2056,12 @@ class Game {
 
         if(this.updLight) this.calcLight();
 
-        this.checkObjectiveCompletion();
+        const now = performance.now();
+        if (this.pendingObjectiveCheck && now - this.lastObjectiveCheck >= this.objectiveCheckInterval) {
+            this.lastObjectiveCheck = now;
+            this.pendingObjectiveCheck = false;
+            this.checkObjectiveCompletion();
+        }
     }
     
     collide(obj, isX) {
