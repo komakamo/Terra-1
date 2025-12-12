@@ -1079,6 +1079,9 @@ class Game {
             statusEffects: [] // {type, duration, power}
         };
 
+        this.statusEffectsCache = new Map();
+        this.lastStatusEffectRender = 0;
+
         this.settings = { difficulty: 'normal' };
         this.cam = {x:0, y:0}; this.keys = {}; this.mouse = {x:0, y:0, l:false, r:false};
         this.mining = {on:false, x:-1, y:-1, t:0, dur:0};
@@ -1876,9 +1879,11 @@ class Game {
         });
     }
 
-    renderStatusEffects() {
+    renderStatusEffects(force = false) {
         const container = document.getElementById('status-effects-container');
-        container.innerHTML = '';
+        if (!container) return;
+
+        if (!this.statusEffectsCache) this.statusEffectsCache = new Map();
 
         // アイコンの定義
         const effectIcons = {
@@ -1891,19 +1896,51 @@ class Game {
             moveSpeedUP: { background: '#8bc34a', text: '速' },
         };
 
+        const currentEffects = new Map();
         this.player.statusEffects.forEach(effect => {
-            const iconInfo = effectIcons[effect.type] || { background: '#ccc', text: '？' };
-            const remainingSeconds = Math.ceil(effect.duration / 60);
-
-            const iconDiv = document.createElement('div');
-            iconDiv.className = 'status-icon';
-            iconDiv.style.background = iconInfo.background;
-            iconDiv.innerHTML = `
-                <span>${iconInfo.text}</span>
-                <span class="duration">${remainingSeconds}</span>
-            `;
-            container.appendChild(iconDiv);
+            currentEffects.set(effect.type, Math.ceil(effect.duration / 60));
         });
+
+        // Detect if anything actually changed
+        if (!force && currentEffects.size === this.statusEffectsCache.size) {
+            let unchanged = true;
+            for (const [type, remaining] of currentEffects) {
+                if (this.statusEffectsCache.get(type) !== remaining) { unchanged = false; break; }
+            }
+            if (unchanged) return;
+        }
+
+        // Update or create icons
+        currentEffects.forEach((remainingSeconds, type) => {
+            const iconInfo = effectIcons[type] || { background: '#ccc', text: '？' };
+            let iconDiv = container.querySelector(`[data-effect="${type}"]`);
+            if (!iconDiv) {
+                iconDiv = document.createElement('div');
+                iconDiv.className = 'status-icon';
+                iconDiv.dataset.effect = type;
+                iconDiv.innerHTML = `
+                    <span>${iconInfo.text}</span>
+                    <span class="duration"></span>
+                `;
+                container.appendChild(iconDiv);
+            }
+
+            iconDiv.style.background = iconInfo.background;
+            const durationSpan = iconDiv.querySelector('.duration');
+            if (durationSpan && durationSpan.textContent !== String(remainingSeconds)) {
+                durationSpan.textContent = remainingSeconds;
+            }
+        });
+
+        // Remove icons for effects that have ended
+        Array.from(container.querySelectorAll('.status-icon')).forEach(icon => {
+            if (!currentEffects.has(icon.dataset.effect)) {
+                icon.remove();
+            }
+        });
+
+        this.statusEffectsCache = currentEffects;
+        this.lastStatusEffectRender = this.time;
     }
 
     uiUpd() {
@@ -2003,10 +2040,8 @@ class Game {
         this.parts.forEach(pt=>pt.update()); this.parts=this.parts.filter(pt=>pt.life>0);
         this.texts.forEach(t=>t.update()); this.texts=this.texts.filter(t=>t.life>0);
         this.updateStatusEffects();
-        this.renderStatusEffects(); // Update UI every frame for smooth countdown
 
         if(this.updLight) this.calcLight();
-
         this.checkObjectiveCompletion();
     }
     
@@ -2296,10 +2331,16 @@ class Game {
             }
         }
 
+        const shouldRender = effectsChanged || (this.time - this.lastStatusEffectRender) >= 15;
+
         if (effectsChanged) {
             this.calcDef(); // 防御力などの再計算
             this.uiUpd(); // 効果が切れたらUIを更新
+        } else if (shouldRender) {
+            this.renderStatusEffects();
         }
+
+        if (shouldRender) this.lastStatusEffectRender = this.time;
     }
 
     playerHit(dmg) {
