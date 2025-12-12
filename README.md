@@ -17,6 +17,22 @@ Download the official asset bundle shared by the project maintainers (for exampl
 2. Serve the folder with a static file server (e.g., `python -m http.server 8000`).
 3. Open `http://localhost:8000/index.html` in your browser.
 
+## Installing dependencies
+The project’s automated browser tests rely on Playwright. Install the Python package and browser binaries before running the tests:
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+If you are not using the requirements file, you can install the dependency directly with `pip install playwright` before running `playwright install`.
+
+## Running browser tests
+1. Ensure the assets listed above are available in the `assets/` directory structure.
+2. Install Playwright and the Chromium browser as described in the **Installing dependencies** section.
+3. Start the automated tests: `python run_browser_tests.py`.
+4. The script launches a local HTTP server and runs the Playwright suite in headless Chromium. It will exit with a non-zero status if any test fails.
+
 ## Deploying to GitHub Pages
 1. Ensure the `assets/` and `assets/images/` folders contain the downloaded media before pushing.
 2. Commit only the placeholder README files (not the binary assets) if you need to create the directories in your repository.
