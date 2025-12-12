@@ -1411,6 +1411,12 @@ class Game {
         try { localStorage.setItem('miniTerrariaSave', JSON.stringify(data)); this.log("Game Saved!"); } catch(e) { this.log("Save failed"); }
     }
 
+    ensurePlayerProgressDefaults() {
+        if (!Number.isFinite(this.player.level) || this.player.level < 1) this.player.level = 1;
+        if (!Number.isFinite(this.player.xp) || this.player.xp < 0) this.player.xp = 0;
+        if (!Number.isFinite(this.player.nextLevelXp) || this.player.nextLevelXp <= 0) this.player.nextLevelXp = 100;
+    }
+
     loadGame() {
         const raw = localStorage.getItem('miniTerrariaSave'); if(!raw) return false;
 
@@ -1443,6 +1449,7 @@ class Game {
         this.world = d.world; this.walls = d.walls; this.player = d.player || this.player; this.time = (typeof d.time === 'number') ? d.time : this.time;
         this.currentObjectiveIndex = Number.isInteger(d.currentObjectiveIndex) ? d.currentObjectiveIndex : this.currentObjectiveIndex;
         this.flags = d.flags || this.flags || {};
+        this.ensurePlayerProgressDefaults();
 
         // Ensure inv size compatibility
         if (!Array.isArray(this.player.inv)) this.player.inv = [];
@@ -1956,6 +1963,7 @@ class Game {
     }
 
     uiUpd() {
+        this.ensurePlayerProgressDefaults();
         this.renderStatusEffects();
         let b=document.getElementById('hotbar'); b.innerHTML='';
         // Only show first 9 in hotbar
@@ -1980,7 +1988,7 @@ class Game {
 
         // XP Bar & Level
         document.getElementById('level-display').innerText = `Lv. ${this.player.level}`;
-        const xpPercent = (this.player.xp / this.player.nextLevelXp) * 100;
+        const xpPercent = Math.min(100, Math.max(0, (this.player.xp / this.player.nextLevelXp) * 100));
         document.getElementById('xp-bar-fill').style.width = `${xpPercent}%`;
 
         if(this.ui.craft) this.rendRec();
